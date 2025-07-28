@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import time
 from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
 from typing import Optional, Self
@@ -275,11 +276,23 @@ class SigsumLogAPI:
 
         return cls(*log, quorum)
 
-    def do_request(self, *args) -> dict[str, list[list[str]]]:
+    def do_request(self, *args, timeout=60) -> dict[str, list[list[str]]]:
         url = '/'.join([self.endpoint, *[str(x) for x in args]])
-        resp = self.session.get(url, timeout=30)
-        resp.raise_for_status()
-        return parse_ascii(resp.text)
+
+        backoff = 1
+        deadline = time.time() + timeout
+        while True:
+            remaining = max(0, deadline - time.time())
+
+            resp = self.session.get(url, timeout=remaining)
+            if resp.status_code == 429:
+                if time.time() + backoff < deadline:
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+
+            resp.raise_for_status()
+            return parse_ascii(resp.text)
 
     def get_tree_head(self) -> TreeHead:
         th = self.do_request('get-tree-head')
