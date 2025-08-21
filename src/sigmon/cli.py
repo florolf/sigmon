@@ -127,14 +127,16 @@ def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str]):
         return
 
     for child in sorted(hook_dir.iterdir()):
-        child = child.resolve()
-        if not child.is_file():
+        resolved = child.resolve()
+        if not resolved.is_file():
             continue
 
-        if not os.access(child, os.X_OK):
+        if not os.access(resolved, os.X_OK):
             continue
 
-        subprocess.run([str(child)], cwd=state_dir, env=merged_env)
+        ret = subprocess.run([str(resolved)], cwd=state_dir, env=merged_env)
+        if ret.returncode != 0:
+            logger.warning(f'executing handler "{child.name}" for event "{hook_type}" failed, exit code {ret.returncode}')
 
 
 def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], leaf: TreeLeaf):
