@@ -197,14 +197,14 @@ def do_poll(args: argparse.Namespace):
                 logger.error('poll cycle failed', exc_info=e)
                 break
 
-            for idx, leaf in enumerate(leaves):
+            for idx, leaf in enumerate(leaves, start=start_idx):
                 if leaf.key_hash not in matches:
                     continue
 
                 match = matches[leaf.key_hash]
                 logger.info(f'index {idx} matched key {match["alias"] if "alias" in match else leaf.key_hash.hex()}, checksum is {leaf.checksum.hex()}')
 
-                handle_match(args.state_dir, log.endpoint, start_idx+idx, match, leaf)
+                handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
             write_json_atomic(state_file, monitor.get_state())
 
