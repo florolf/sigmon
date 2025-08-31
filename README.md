@@ -86,6 +86,8 @@ Now, `interesting-key` will be used in log statements instead of the hard to rec
 
 sigmon will execute hook scripts on certain events. Currently, the only supported event is `match`, which is emitted any time an item from the watchlist appears in the log. All the executable files (or symlinks to such files) in `hooks/match/` will be executed in lexicographic order. The working directory is the top level state directory (i.e. the one that contains the policy file, for example) and all information is passed in through environment variables.
 
+sigmon takes care not to lose any `match` events. I.e. it only updates its internal state after all relevant hooks have been executed. If it or the system crashes before that, hooks that were already called for a log entry might get called again (i.e. "at least once" delivery semantics). Note that sigmon intentionally does *not* have any retry logic for when the execution of a hook itself fails (i.e. it returns an exit code other than zero).
+
 Those variables are:
 
  - `LOG_ENDPOINT`: The log endpoint URL from the policy file
