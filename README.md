@@ -18,11 +18,12 @@ sigmon uses a single directory to store all configuration and state related to a
 │   └── match
 │       └── ...
 ├── policy
-├── state.json
+├── log
+│   └── 4644af2abd40f4895a003bca350f9d5912ab301a49c77f13e5b6d905c20a5fe6.json
 └── watchlist
 ```
 
-The only mandatory file is `policy`, which is the [sigsum policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/main/doc/policy.md) that describes the parameters of the log itself. `state.json` is created by the `init` subcommand and managed by `sigmon` itself thereafter. `watchlist` lists the keys to watch the log for and `hooks` contains the hooks that will get executed for specific events like `match`.
+The only mandatory file is `policy`, which is the [sigsum policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/main/doc/policy.md) that describes the parameters of the log itself. The `log` subdirectory is created by the `init` subcommand and managed by `sigmon` itself thereafter. `watchlist` lists the keys to watch the log for and `hooks` contains the hooks that will get executed for specific events like `match`.
 
 To get started using the `barreleye` test log, create an empty directory (the name is arbitrary, but naming it after the log makes sense) and create a minimal policy file:
 
@@ -48,7 +49,7 @@ By default, this will set things up such that sigmon will tail the log from wher
 $ sigmon init barreleye 0
 ```
 
-You can use `-f` to force reinitialization even if a monitor state file is already present.
+You can use `-f` to force reinitialization even if a log state file is already present.
 
 Now, you can poll the log:
 

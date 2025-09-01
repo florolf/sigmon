@@ -197,7 +197,7 @@ class SigsumLogAPI:
         self.quorum = quorum
 
     @classmethod
-    def from_policy(cls, policy: str) -> Self:
+    def from_policy(cls, policy: str, log_key: Optional[bytes] = None) -> Self:
         log = None
 
         have_quorum = False
@@ -210,8 +210,12 @@ class SigsumLogAPI:
 
             match line.split():
                 case ['log', key, url]:
+                    cur_log_key = bytes.fromhex(key)
+                    if log_key is not None and cur_log_key != log_key:
+                        continue
+
                     if log is not None:
-                        raise ValueError('multiple log definitions in policy')
+                        raise ValueError('multiple log definitions in policy and no filter given')
 
                     log = (url, bytes.fromhex(key))
 
@@ -265,7 +269,7 @@ class SigsumLogAPI:
                     raise ValueError(f'unknown policy command "{unknown}"')
 
         if log is None:
-            raise ValueError('no log specified in policy')
+            raise ValueError('no log found in policy')
 
         if not have_quorum:
             raise ValueError('quorum not specified')
