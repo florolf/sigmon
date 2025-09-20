@@ -40,6 +40,12 @@ def write_json_atomic(path: Path, data: Any):
         raise
 
 
+def write_state_file(path: Path, monitor: Monitor):
+    write_json_atomic(path, {
+        'monitor': monitor.get_state()
+    })
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="sigmon", description="Monitor Sigsum logs")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
@@ -50,11 +56,13 @@ def build_parser():
     init_parser.add_argument("state_dir", type=Path, help="Path to config/state directory")
     init_parser.add_argument("leaf_index", nargs="?", type=int, help="Index of first leaf to fetch (default: tail the log)")
     init_parser.add_argument("-f", "--force", action="store_true", help="Force reinitialization even if state is present")
+    init_parser.add_argument("--log", metavar='URL', help="Select a specific log from the policy file (URL or unique substring thereof)")
 
     poll_parser = subparsers.add_parser("poll", help="Poll for new log entries")
     poll_parser.add_argument("state_dir", type=Path, help="Path to config/state directory")
     poll_parser.add_argument("--batch-size", type=int, default=None, help="Limit maximum number of leaves to fetch at once")
     poll_parser.add_argument("-i", "--interval", type=float, metavar="SECONDS", help="Polling interval in seconds. If omitted, do a single poll and exit.")
+    poll_parser.add_argument("--log", metavar='URL', help="Select a specific log from the policy file (URL or unique substring thereof)")
 
     return parser
 
@@ -106,16 +114,19 @@ def load_matches(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def do_init(args: argparse.Namespace):
-    state_file = args.state_dir / 'state.json'
+    with open(args.state_dir / 'policy', 'r') as f:
+        log = SigsumLogAPI.from_policy(f.read(), log_filter=args.log)
+
+    log_dir = args.state_dir / 'log'
+    log_dir.mkdir(exist_ok=True)
+
+    state_file = log_dir / f'{bytes(log.pubkey).hex()}.json'
     if state_file.exists() and not args.force:
         logger.error("%s exists and --force is not given", state_file)
         sys.exit(1)
 
-    with open(args.state_dir / 'policy', 'r') as f:
-        log = SigsumLogAPI.from_policy(f.read())
-
     monitor = Monitor.from_log(log, args.leaf_index)
-    write_json_atomic(state_file, monitor.get_state())
+    write_state_file(state_file, monitor)
 
 
 def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str]):
@@ -170,9 +181,9 @@ def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], lea
 
 def do_poll(args: argparse.Namespace):
     with open(args.state_dir / 'policy', 'r') as f:
-        log = SigsumLogAPI.from_policy(f.read())
+        log = SigsumLogAPI.from_policy(f.read(), log_filter=args.log)
 
-    state_file = args.state_dir / 'state.json'
+    state_file = args.state_dir / 'log' / f'{bytes(log.pubkey).hex()}.json'
     with open(state_file, 'r') as f:
         state = json.load(f)
 
@@ -180,7 +191,7 @@ def do_poll(args: argparse.Namespace):
     watchlist_ts = None
     matches = {}
 
-    monitor = Monitor.from_state(log, state)
+    monitor = Monitor.from_state(log, state['monitor'])
 
     while True:
         if watchlist.exists():
@@ -208,7 +219,7 @@ def do_poll(args: argparse.Namespace):
 
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
-            write_json_atomic(state_file, monitor.get_state())
+            write_state_file(state_file, monitor)
 
             if not remaining:
                 break
