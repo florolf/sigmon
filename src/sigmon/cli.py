@@ -224,10 +224,6 @@ def do_poll(args: argparse.Namespace):
             if not remaining:
                 break
 
-            # TODO: what would be a reasonable back-off strategy here given
-            # that we need to catch up in a finite amount of time
-            time.sleep(1)
-
         if args.interval is None:
             break
 

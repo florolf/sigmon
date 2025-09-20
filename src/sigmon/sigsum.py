@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import time
 from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
 from typing import Optional, Self
@@ -275,11 +276,26 @@ class SigsumLogAPI:
 
         return cls(*log, quorum)
 
-    def get_tree_head(self) -> TreeHead:
-        resp = self.session.get(f"{self.endpoint}/get-tree-head", timeout=30)
-        resp.raise_for_status()
+    def do_request(self, *args, timeout=60) -> dict[str, list[list[str]]]:
+        url = '/'.join([self.endpoint, *[str(x) for x in args]])
 
-        th = parse_ascii(resp.text)
+        backoff = 1
+        deadline = time.time() + timeout
+        while True:
+            remaining = max(0, deadline - time.time())
+
+            resp = self.session.get(url, timeout=remaining)
+            if resp.status_code == 429:
+                if time.time() + backoff < deadline:
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+
+            resp.raise_for_status()
+            return parse_ascii(resp.text)
+
+    def get_tree_head(self) -> TreeHead:
+        th = self.do_request('get-tree-head')
 
         root_hash = bytes.fromhex(th['root_hash'][0][0])
         if len(root_hash) != 32:
@@ -321,12 +337,7 @@ class SigsumLogAPI:
         return TreeHead(size, root_hash)
 
     def get_leaves(self, start: int, end: int) -> list[TreeLeaf]:
-        resp = self.session.get(
-            f"{self.endpoint}/get-leaves/{start}/{end}",
-            timeout=30)
-        resp.raise_for_status()
-
-        leaves = parse_ascii(resp.text)['leaf']
+        leaves = self.do_request('get-leaves', start, end)['leaf']
 
         result = []
         for checksum, signature, key_hash in leaves:
@@ -339,12 +350,7 @@ class SigsumLogAPI:
         return result
 
     def get_inclusion_proof(self, size: int, leaf: TreeLeaf) -> InclusionProof:
-        resp = self.session.get(
-            f"{self.endpoint}/get-inclusion-proof/{size}/{leaf.leaf_hash().hex()}",
-            timeout=30)
-        resp.raise_for_status()
-
-        proof = parse_ascii(resp.text)
+        proof = self.do_request('get-inclusion-proof', size, leaf.leaf_hash().hex())
 
         leaf_index = int(proof['leaf_index'][0][0])
         if leaf_index < 0:
@@ -355,12 +361,7 @@ class SigsumLogAPI:
         return InclusionProof(leaf_index, node_hashes)
 
     def get_consistency_proof(self, old_size: int, new_size: int) -> ConsistencyProof:
-        resp = self.session.get(
-            f"{self.endpoint}/get-consistency-proof/{old_size}/{new_size}",
-            timeout=30)
-        resp.raise_for_status()
-
-        proof = parse_ascii(resp.text)
+        proof = self.do_request('get-consistency-proof', old_size, new_size)
 
         return ConsistencyProof(
             [bytes.fromhex(x[0]) for x in proof['node_hash']],
