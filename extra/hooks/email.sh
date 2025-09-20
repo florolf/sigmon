@@ -31,9 +31,20 @@ else
 	is_valid=""
 fi
 
-mail -s "New ${is_valid}signature from \"${key_name}\" on ${LOG_ENDPOINT} (index ${LEAF_INDEX})" "$EMAIL_ADDRESS" <<EOF
+(
+	cat <<EOF
 Log: ${LOG_ENDPOINT}
 Leaf index: ${LEAF_INDEX}
 Keyhash: ${KEY_HASH}
 Checksum: ${LEAF_CHECKSUM}
 EOF
+
+	for hook in "${!LEAF_INFO_@}"
+	do
+		echo
+		echo "Auxiliary leaf info (${hook:10}):"
+		echo "------------------------------------------------------------------------"
+		echo "${!hook}"
+		echo "------------------------------------------------------------------------"
+	done
+) | mail -s "New ${is_valid}signature from \"${key_name}\" on ${LOG_ENDPOINT} (index ${LEAF_INDEX})" "$EMAIL_ADDRESS"
