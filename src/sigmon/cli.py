@@ -40,6 +40,12 @@ def write_json_atomic(path: Path, data: Any):
         raise
 
 
+def write_state_file(path: Path, monitor: Monitor):
+    write_json_atomic(path, {
+        'monitor': monitor.get_state()
+    })
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="sigmon", description="Monitor Sigsum logs")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
@@ -120,7 +126,7 @@ def do_init(args: argparse.Namespace):
         sys.exit(1)
 
     monitor = Monitor.from_log(log, args.leaf_index)
-    write_json_atomic(state_file, monitor.get_state())
+    write_state_file(state_file, monitor)
 
 
 def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str]):
@@ -185,7 +191,7 @@ def do_poll(args: argparse.Namespace):
     watchlist_ts = None
     matches = {}
 
-    monitor = Monitor.from_state(log, state)
+    monitor = Monitor.from_state(log, state['monitor'])
 
     while True:
         if watchlist.exists():
@@ -213,7 +219,7 @@ def do_poll(args: argparse.Namespace):
 
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
-            write_json_atomic(state_file, monitor.get_state())
+            write_state_file(state_file, monitor)
 
             if not remaining:
                 break
