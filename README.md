@@ -85,16 +85,23 @@ Now, `interesting-key` will be used in log statements instead of the hard to rec
 
 ## Hooks
 
-sigmon will execute hook scripts on certain events. Currently, the only supported event is `match`, which is emitted any time an item from the watchlist appears in the log. All the executable files (or symlinks to such files) in `hooks/match/` will be executed in lexicographic order. The working directory is the top level state directory (i.e. the one that contains the policy file, for example) and all information is passed in through environment variables.
+sigmon will execute hook scripts in certain cases. Currently, the only supported hook types are `match` and `leaf_info`, described below. Hooks are executed by runnign all the executable files (or symlinks to such files) in `hooks/$HOOK_TYPE/` in lexicographic order. The working directory is the top level state directory (i.e. the one that contains the policy file, for example) and all information is passed in through environment variables.
+
+See the `extra/hooks` directory for some example hooks. They take their configuration from a global config file in the state directory (`hook_cfg.sh`) or the watchlist, where the latter takes precedence.
+
+### `match`
+
+A match event is emitted any time an item from the watchlist appears in the log.
 
 sigmon takes care not to lose any `match` events. I.e. it only updates its internal state after all relevant hooks have been executed. If it or the system crashes before that, hooks that were already called for a log entry might get called again (i.e. "at least once" delivery semantics). Note that sigmon intentionally does *not* have any retry logic for when the execution of a hook itself fails (i.e. it returns an exit code other than zero).
 
-Those variables are:
+The environment variables provided to the hook are:
 
  - `LOG_ENDPOINT`: The log endpoint URL from the policy file
  - `LEAF_INDEX`: The numerical index of the leaf that matched
  - `LEAF_CHECKSUM`: The contents of the `checksum` field of the leaf (hex-encoded)
  - `LEAF_SIGNATURE`: The contents of the `signature` field of the leaf (hex-encoded)
+ - `LEAF_INFO_x` for each `leaf_info` result, where `x` is the leaf information hook name. See below for more information.
  - `KEY_HASH`: The contents of the `key_hash` field of the leaf (hex-encoded)
  - `KEY_ATTR_x` for each attribute `x` specified in the watchlist
 
@@ -102,4 +109,11 @@ Additionally, if the `key` directive was used in the watch file, the following v
  - `KEY`: The pubkey itself (hex-encoded)
  - `LEAF_SIGNATURE_VALID`: `1` if the leaf signature is valid, `0` otherwise.
 
-See the `extra/hooks` directory for some example hooks. They take their configuration from a global config file in the state directory (`hook_cfg.sh`) or the watchlist, where the latter takes precedence.
+### `leaf_info`
+
+Before a match event is emitted, `leaf_info` hooks are run that can fetch auxiliary information about the leaf in an application-specific manner. For example, a `leaf_info` hook could be used to retrieve the document that has been signed by a key if all such documents are published in a well-known place based on their checksums. A `match` hook can then include this document in the notification that it sends out.
+
+Some considerations for implementing a leaf information hook:
+ - It should validate whatever information it retrieves against the `LEAF_CHEKSUM` parameter, otherwise an attacker could possibly falsify it in-flight.
+ - It should print whatever information it wishes to add to stdout. If it has nothing to add, it should produce no output.
+ - It can use the `KEY_HASH` or some `KEY_ATTR_` field to determine if it should handle a given leaf.

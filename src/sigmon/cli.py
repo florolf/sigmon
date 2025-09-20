@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import time
-from typing import Any
+from typing import Any, Optional
 from pathlib import Path
 import tempfile
 import subprocess
@@ -129,9 +129,12 @@ def do_init(args: argparse.Namespace):
     write_state_file(state_file, monitor)
 
 
-def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str]):
+def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str], run_args: Optional[dict[str, Any]] = None):
     merged_env = os.environ.copy()
     merged_env.update(env)
+
+    if run_args is None:
+        run_args = {}
 
     hook_dir = state_dir / 'hooks' / hook_type
     if not hook_dir.exists():
@@ -145,10 +148,11 @@ def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str]):
         if not os.access(resolved, os.X_OK):
             continue
 
-        ret = subprocess.run([str(resolved)], cwd=state_dir, env=merged_env)
+        ret = subprocess.run([str(resolved)], cwd=state_dir, env=merged_env, **run_args)
         if ret.returncode != 0:
-            logger.warning(f'executing handler "{child.name}" for event "{hook_type}" failed, exit code {ret.returncode}')
+            logger.warning(f'executing handler "{child.name}" for hook type "{hook_type}" failed, exit code {ret.returncode}')
 
+        yield child.name, ret
 
 def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], leaf: TreeLeaf):
     env: dict[str, str] = {
@@ -176,7 +180,18 @@ def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], lea
             logger.warning(f'signature check on leaf {leaf}, idx {idx} failed')
             env['LEAF_SIGNATURE_VALID'] = '0'
 
-    call_hooks(state_dir, 'match', env)
+    for hook_name, result in call_hooks(state_dir, 'leaf_info', env, run_args={
+            'stdout': subprocess.PIPE,
+            'text': True
+    }):
+        if result.returncode != 0:
+            continue
+
+        if result.stdout:
+            env[f'LEAF_INFO_{hook_name}'] = result.stdout.strip()
+
+    for _ in call_hooks(state_dir, 'match', env):
+        pass
 
 
 def do_poll(args: argparse.Namespace):
