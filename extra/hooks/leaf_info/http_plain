@@ -1,0 +1,34 @@
+#!/bin/bash
+
+set -ueo pipefail
+
+if [[ -z "${KEY_ATTR_leaf_info_http_base+x}" ]]
+then
+	exit 0
+fi
+
+payload=$(mktemp -t "http_plain.XXXXXXXXXX")
+cleanup() {
+	rm -f "$payload"
+}
+trap cleanup EXIT
+
+url="${KEY_ATTR_leaf_info_http_base}/${LEAF_CHECKSUM:0:4}/${LEAF_CHECKSUM}"
+
+if ! curl -o "$payload" -sS -f "$url" 2>&1
+then
+	echo "Failed to fetch payload"
+	exit 0
+fi
+
+data_hash=$(sha256sum "$payload" | cut -d' ' -f1)
+data_checksum=$(echo "$data_hash" | xxd -r -ps | sha256sum | cut -d' ' -f1)
+
+if [[ "$data_checksum" != "$LEAF_CHECKSUM" ]]
+then
+	echo "Checksum mismatch at ${url}. Expected ${LEAF_CHECKSUM}, got ${data_checksum}."
+	exit 0
+fi
+
+cat "$payload"
+exit 0
