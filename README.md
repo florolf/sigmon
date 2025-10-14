@@ -4,7 +4,7 @@
 
 This is a small [sigsum](https://sigsum.org) monitor. It watches a log for signatures made with keys of interest and can execute hooks when a matching signature is detected to notify interested parties of that fact.
 
-It verifies that tree heads follow the specified [policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/main/doc/policy.md), subsequent tree heads are consistent and that all the leaves returned by the log are indeed included properly. Crucially, it keeps enough state to do this without requesting inclusion or consistency proofs in the common case.
+It verifies that tree heads follow the specified [policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/v0.11.2/doc/policy.md), subsequent tree heads are consistent and that all the leaves returned by the log are indeed included properly. Crucially, it keeps enough state to do this without requesting inclusion or consistency proofs in the common case.
 
 ## Usage
 
@@ -23,7 +23,7 @@ sigmon uses a single directory to store all configuration and state related to a
 └── watchlist
 ```
 
-The only mandatory file is `policy`, which is the [sigsum policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/main/doc/policy.md) that describes the parameters of the log itself. The `log` subdirectory is created by the `init` subcommand and managed by `sigmon` itself thereafter. `watchlist` lists the keys to watch the log for and `hooks` contains the hooks that will get executed for specific events like `match`.
+The only mandatory file is `policy`, which is the [sigsum policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/v0.11.2/doc/policy.md) that describes the parameters of the log itself. The `log` subdirectory is created by the `init` subcommand and managed by `sigmon` itself thereafter. `watchlist` lists the keys to watch the log for and `hooks` contains the hooks that will get executed for specific events like `match`.
 
 To get started using the `barreleye` test log, create an empty directory (the name is arbitrary, but naming it after the log makes sense) and create a minimal policy file:
 
