@@ -72,8 +72,10 @@ def load_matches(path: Path) -> dict[str, dict[str, Any]]:
 
     with open(path, 'r') as f:
         for lineno, line in enumerate(f, start=1):
-            line = line.strip()
+            if line.startswith('#'):
+                continue
 
+            line = line.strip()
             items = line.split()
 
             match items[0]:
