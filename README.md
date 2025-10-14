@@ -99,7 +99,7 @@ The environment variables provided to the hook are:
 
  - `LOG_ENDPOINT`: The log endpoint URL from the policy file
  - `LEAF_INDEX`: The numerical index of the leaf that matched
- - `LEAF_CHECKSUM`: The contents of the `checksum` field of the leaf (hex-encoded)
+ - `LEAF_CHECKSUM`: The contents of the `checksum` field of the [leaf](https://git.glasklar.is/sigsum/project/documentation/-/blob/2cda72a89f08fa83d3cc09818afd3795225c02e0/log.md#224--merkle-tree-leaf) (hex-encoded)
  - `LEAF_SIGNATURE`: The contents of the `signature` field of the leaf (hex-encoded)
  - `LEAF_INFO_x` for each `leaf_info` result, where `x` is the leaf information hook name. See below for more information.
  - `KEY_HASH`: The contents of the `key_hash` field of the leaf (hex-encoded)
