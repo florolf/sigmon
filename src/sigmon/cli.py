@@ -76,8 +76,10 @@ def load_matches(path: Path) -> dict[str, dict[str, Any]]:
                 continue
 
             line = line.strip()
-            items = line.split()
+            if not line:
+                continue
 
+            items = line.split()
             match items[0]:
                 case 'keyhash':
                     keyhash = bytes.fromhex(items[1])
