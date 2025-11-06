@@ -268,6 +268,9 @@ class SigsumLogAPI:
                 case [unknown, *_]:
                     raise ValueError(f'unknown policy command "{unknown}"')
 
+                case []:
+                    continue
+
         if log is None:
             raise ValueError('no log found in policy')
 
