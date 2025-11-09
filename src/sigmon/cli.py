@@ -20,30 +20,62 @@ from .utils import sha256
 
 logger = logging.getLogger(__name__)
 
-def write_json_atomic(path: Path, data: Any):
-    path = path.resolve()
+class State:
+    def __init__(self, path: Path):
+        self.path = path
+        self.data = {}
 
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
-        json.dump(data, f, sort_keys=True, indent=True)
-        f.flush()
-        os.fsync(f.fileno())
-        tmp = f.name
+    def load(self):
+        with self.path.open('r') as f:
+            self.data = json.load(f)
 
-    try:
-        os.replace(tmp, path)
-    except:
+    def save(self):
+        path = self.path.resolve()
+
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
+            json.dump(self.data, f, sort_keys=True, indent=True)
+            f.flush()
+            os.fsync(f.fileno())
+            tmp = f.name
+
         try:
-            os.remove(tmp)
-        except OSError:
-            pass
+            os.replace(tmp, path)
+        except:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
-        raise
+            raise
 
+    def get_dict(self, path):
+        cur = self.data
 
-def write_state_file(path: Path, monitor: Monitor):
-    write_json_atomic(path, {
-        'monitor': monitor.get_state()
-    })
+        for elem in path:
+            if elem not in cur:
+                cur[elem] = {}
+
+            cur = cur[elem]
+
+        return cur
+
+    def __getitem__(self, path):
+        if not isinstance(path, tuple):
+            path = (path,)
+
+        d = self.get_dict(path[:-1])
+        return d[path[-1]]
+
+    def get(self, path: list[str], default):
+        d = self.get_dict(path[:-1])
+        return d.get(path[-1], default)
+
+    def __setitem__(self, path, value):
+        if not isinstance(path, tuple):
+            path = (path,)
+
+        d = self.get_dict(path[:-1])
+        d[path[-1]] = value
 
 
 def build_parser():
@@ -129,8 +161,12 @@ def do_init(args: argparse.Namespace):
         logger.error("%s exists and --force is not given", state_file)
         sys.exit(1)
 
+    state = State(state_file)
+
     monitor = Monitor.from_log(log, args.leaf_index)
-    write_state_file(state_file, monitor)
+    state['monitor'] = monitor.get_state()
+
+    state.save()
 
 
 def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str], run_args: Optional[dict[str, Any]] = None):
@@ -202,9 +238,8 @@ def do_poll(args: argparse.Namespace):
     with open(args.state_dir / 'policy', 'r') as f:
         log = SigsumLogAPI.from_policy(f.read(), log_filter=args.log)
 
-    state_file = args.state_dir / 'log' / f'{bytes(log.pubkey).hex()}.json'
-    with open(state_file, 'r') as f:
-        state = json.load(f)
+    state = State(args.state_dir / 'log' / f'{bytes(log.pubkey).hex()}.json')
+    state.load()
 
     watchlist = args.state_dir / 'watchlist'
     watchlist_ts = None
@@ -238,7 +273,8 @@ def do_poll(args: argparse.Namespace):
 
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
-            write_state_file(state_file, monitor)
+            state['monitor'] = monitor.get_state()
+            state.save()
 
             if not remaining:
                 break
