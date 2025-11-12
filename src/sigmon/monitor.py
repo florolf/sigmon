@@ -57,6 +57,10 @@ class MerkleTree:
         return stack[0]
 
 
+class LogConsistencyError(Exception):
+    pass
+
+
 class Monitor:
     def __init__(self, log: SigsumLogAPI, tree: MerkleTree):
         self.log = log
@@ -135,11 +139,11 @@ class Monitor:
         rh = new_tree.root_hash()
         if new_tree.size == th.size:
             if rh != th.root_hash:
-                raise RuntimeError('root hash mismatch, ours: %s, theirs: %s', rh.hex(), th.root_hash.hex())
+                raise LogConsistencyError(f'root hash mismatch at size {th.size}, ours: {rh.hex()}, log: {th.root_hash.hex()}')
         else:
             cp = self.log.get_consistency_proof(new_tree.size, th.size)
             if not cp.check(rh, th.root_hash):
-                raise RuntimeError('proof is invalid, proof was: %s', cp)
+                raise LogConsistencyError(f'consistency proof is invalid. old_hash={rh.hex()}, new_hash={th.root_hash.hex()}, proof={cp}')
 
         logger.debug('validated head moved from %d to %d', self.tree.size, new_tree.size)
         self.tree = new_tree
