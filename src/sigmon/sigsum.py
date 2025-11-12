@@ -30,12 +30,55 @@ def parse_ascii(doc: str) -> dict[str, list[list[str]]]:
 
 
 @dataclass(frozen=True)
+class Cosignature:
+    key_hash: bytes
+    timestamp: int
+    signature: bytes
+
+    def __str__(self):
+        return f"Cosignature(key_hash={self.key_hash.hex()}, timestamp={self.timestamp}, signature={self.signature.hex()})"
+
+
+@dataclass(frozen=True)
 class TreeHead:
+    origin: str
+    signature: bytes
+
     size: int
     root_hash: bytes
 
+    cosignatures: list[Cosignature]
+
+    @classmethod
+    def from_ascii(cls, log_key_hash: bytes, ascii_: str) -> Self:
+        data = parse_ascii(ascii_)
+
+        root_hash = bytes.fromhex(data['root_hash'][0][0])
+        if len(root_hash) != 32:
+            raise ValueError(f'unexpected root_hash length: {len(root_hash)} != 32')
+
+        size = int(data['size'][0][0])
+        if size < 0:
+            raise ValueError(f'negative tree size: {size}')
+
+        signature = bytes.fromhex(data['signature'][0][0])
+
+        cosignatures = []
+        for key_hash, timestamp, witness_signature in data['cosignature']:
+            cosignatures.append(Cosignature(
+                bytes.fromhex(key_hash),
+                int(timestamp),
+                bytes.fromhex(witness_signature)
+            ))
+
+        return cls(f"sigsum.org/v1/tree/{log_key_hash.hex()}", signature, size, root_hash, cosignatures)
+
     def __str__(self):
-        return f"TreeHead(size={self.size}, root_hash={self.root_hash.hex()})"
+        cosignatures = ", ".join([str(x) for x in self.cosignatures])
+        return f"TreeHead(size={self.size}, root_hash={self.root_hash.hex()}, cosignatures=[{cosignatures}])"
+
+    def commitment(self) -> str:
+        return f"{self.origin}\n{self.size}\n{b64enc(self.root_hash)}\n"
 
 
 @dataclass(frozen=True)
@@ -56,6 +99,18 @@ class InclusionProof:
     leaf_index: int
     node_hashes: list[bytes]
 
+    @classmethod
+    def from_ascii(cls, ascii_: str) -> Self:
+        proof = parse_ascii(ascii_)
+
+        leaf_index = int(proof['leaf_index'][0][0])
+        if leaf_index < 0:
+            raise ValueError(f'negative leaf index: {leaf_index}')
+
+        node_hashes = [bytes.fromhex(x[0]) for x in proof['node_hash']]
+
+        return cls(leaf_index, node_hashes)
+
     def __str__(self):
         hashes = ", ".join([x.hex() for x in self.node_hashes])
         return f"InclusionProof(leaf_index={self.leaf_index}, node_hashes=[{hashes}]"
@@ -67,6 +122,16 @@ class ConsistencyProof:
 
     old_size: int
     new_size: int
+
+    @classmethod
+    def from_ascii(cls, old_size: int, new_size: int, ascii_: str) -> Self:
+        proof = parse_ascii(ascii_)
+
+        return cls(
+            [bytes.fromhex(x[0]) for x in proof['node_hash']],
+            old_size,
+            new_size
+        )
 
     def __str__(self):
         hashes = ", ".join([x.hex() for x in self.node_hashes])
@@ -279,7 +344,7 @@ class SigsumLogAPI:
 
         return cls(*log, quorum)
 
-    def do_request(self, *args, timeout=60) -> dict[str, list[list[str]]]:
+    def do_request(self, *args, timeout=60) -> str:
         url = '/'.join([self.endpoint, *[str(x) for x in args]])
 
         backoff = 1
@@ -295,55 +360,44 @@ class SigsumLogAPI:
                     continue
 
             resp.raise_for_status()
-            return parse_ascii(resp.text)
+            return resp.text
 
     def get_tree_head(self) -> TreeHead:
-        th = self.do_request('get-tree-head')
+        ascii_ = self.do_request('get-tree-head')
+        th = TreeHead.from_ascii(self.key_hash, ascii_)
+        th_commitment = th.commitment()
 
-        root_hash = bytes.fromhex(th['root_hash'][0][0])
-        if len(root_hash) != 32:
-            raise ValueError(f'unexpected root_hash length: {len(root_hash)} != 32')
-
-        size = int(th['size'][0][0])
-        if size < 0:
-            raise ValueError(f'negative tree size: {size}')
-
-        signature = bytes.fromhex(th['signature'][0][0])
-
-        th_commitment = f"sigsum.org/v1/tree/{self.key_hash.hex()}\n{size}\n{b64enc(root_hash)}\n"
-        self.pubkey.verify(th_commitment.encode(), signature)
+        self.pubkey.verify(th_commitment.encode(), th.signature)
 
         if self.quorum is not None:
             happy_witnesses = []
-            for key_hash, timestamp, signature in th['cosignature']:
-                witness = self.quorum.get_witness(bytes.fromhex(key_hash))
+            for cs in th.cosignatures:
+                witness = self.quorum.get_witness(cs.key_hash)
                 if witness is None:
                     continue
 
                 name = witness[0]
                 pk = nacl.signing.VerifyKey(witness[1])
 
-                timestamp = int(timestamp)
-                signature = bytes.fromhex(signature)
-
-                witness_commitment = f"cosignature/v1\ntime {timestamp}\n{th_commitment}"
+                witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
                 try:
-                    pk.verify(witness_commitment.encode(), signature)
+                    pk.verify(witness_commitment.encode(), cs.signature)
                     happy_witnesses.append(name)
                 except nacl.exceptions.BadSignatureError:
                     logger.warning('invalid witness cosignature from %s over "%s": %s',
-                                   name, witness_commitment, signature.hex())
+                                   name, witness_commitment, cs.signature.hex())
 
             if not self.quorum.check(happy_witnesses):
                 raise ValueError('quorum not reached')
 
-        return TreeHead(size, root_hash)
+        return th
 
     def get_leaves(self, start: int, end: int) -> list[TreeLeaf]:
-        leaves = self.do_request('get-leaves', start, end)['leaf']
+        ascii_ = self.do_request('get-leaves', start, end)
+        data = parse_ascii(ascii_)
 
         result = []
-        for checksum, signature, key_hash in leaves:
+        for checksum, signature, key_hash in data['leaf']:
             result.append(TreeLeaf(
                 bytes.fromhex(checksum),
                 bytes.fromhex(signature),
@@ -353,21 +407,9 @@ class SigsumLogAPI:
         return result
 
     def get_inclusion_proof(self, size: int, leaf: TreeLeaf) -> InclusionProof:
-        proof = self.do_request('get-inclusion-proof', size, leaf.leaf_hash().hex())
-
-        leaf_index = int(proof['leaf_index'][0][0])
-        if leaf_index < 0:
-            raise ValueError(f'negative leaf index: {leaf_index}')
-
-        node_hashes = [bytes.fromhex(x[0]) for x in proof['node_hash']]
-
-        return InclusionProof(leaf_index, node_hashes)
+        ascii_ = self.do_request('get-inclusion-proof', size, leaf.leaf_hash().hex())
+        return InclusionProof.from_ascii(ascii_)
 
     def get_consistency_proof(self, old_size: int, new_size: int) -> ConsistencyProof:
-        proof = self.do_request('get-consistency-proof', old_size, new_size)
-
-        return ConsistencyProof(
-            [bytes.fromhex(x[0]) for x in proof['node_hash']],
-            old_size,
-            new_size
-        )
+        ascii_ = self.do_request('get-consistency-proof', old_size, new_size)
+        return ConsistencyProof.from_ascii(old_size, new_size, ascii_)
