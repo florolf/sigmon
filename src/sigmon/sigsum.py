@@ -212,8 +212,12 @@ class ConsistencyProof:
         return fr == first_hash and sr == second_hash and sn == 0
 
 
-class Quorum:
-    def __init__(self, entities: OrderedDict[str, bytes|tuple[int, set[str]]], entry_point: str):
+class QuorumUnsatisfiedError(Exception):
+    pass
+
+
+class QuorumPolicy:
+    def __init__(self, entities: OrderedDict[str, bytes|tuple[int, set[str]]], entry_point: Optional[str]):
         self.entities = entities
         self.entry_point = entry_point
 
@@ -224,49 +228,8 @@ class Quorum:
 
             self.key_hashes[sha256(entity)] = name
 
-    def get_witness(self, key_hash: bytes) -> Optional[tuple[str, bytes]]:
-        if key_hash not in self.key_hashes:
-            return None
-
-        name = self.key_hashes[key_hash]
-        entity = self.entities[name]
-
-        if not isinstance(entity, bytes):
-            return None
-
-        return (name, entity)
-
-    def check(self, witnesses: list[str]) -> bool:
-        good = set(witnesses)
-
-        # Because the input policy is already topologically sorted (you can
-        # only refer to entities that are already defined), we can just make a
-        # single pass and collect all the groups that are satisfied as we go.
-        for name, entity in self.entities.items():
-            if isinstance(entity, tuple):
-                cardinality, members = entity
-                if len(members & good) >= cardinality:
-                    good.add(name)
-
-        return self.entry_point in good
-
-
-class SigsumLogAPI:
-    def __init__(self, endpoint: str, pubkey: bytes, quorum: Optional[Quorum]):
-        self.endpoint = endpoint
-        self.pubkey = nacl.signing.VerifyKey(pubkey)
-        self.key_hash = sha256(pubkey)
-
-        self.session = requests.Session()
-        self.session.headers['User-Agent'] = f'sigmon/{SIGMON_VERSION}'
-
-        self.quorum = quorum
-
     @classmethod
-    def from_policy(cls, policy: str, log_filter: Optional[str] = None) -> Self:
-        log = None
-
-        have_quorum = False
+    def from_policy(cls, policy: str) -> Self:
         quorum = None
         entities = OrderedDict()
 
@@ -275,30 +238,19 @@ class SigsumLogAPI:
                 continue
 
             match line.split():
-                case ['log', key, url]:
-                    if log_filter is not None and log_filter not in url:
-                        continue
-
-                    if log is not None:
-                        raise ValueError('multiple matching log definitions in policy')
-
-                    log = (url, bytes.fromhex(key))
-
                 case ['quorum', entry_point]:
-                    if have_quorum:
+                    if quorum is not None:
                         raise ValueError('multiple quorum definitions in policy')
 
-                    have_quorum = True
-
                     if entry_point == 'none':
-                        quorum = None
+                        quorum = cls(entities, None)
                     else:
                         if entry_point not in entities:
                             raise ValueError(f'quorum entry point "{entry_point}" is unknown')
 
-                        quorum = Quorum(entities, entry_point)
+                        quorum = cls(entities, entry_point)
 
-                case ['witness', name, pubkey, *url]:
+                case ['witness', name, pubkey, *_]:
                     if name == 'none':
                         raise ValueError('quorum entity name "none" is reserved')
 
@@ -330,17 +282,88 @@ class SigsumLogAPI:
 
                     entities[name] = (cardinality, set(members))
 
-                case [unknown, *_]:
-                    raise ValueError(f'unknown policy command "{unknown}"')
+        if quorum is None:
+            raise ValueError('quorum not specified')
 
-                case []:
-                    continue
+        return quorum
+
+    def check(self, th: TreeHead):
+        if self.entry_point is None:
+            return
+
+        th_commitment = th.commitment()
+
+        good: set[str] = set()
+        for cs in th.cosignatures:
+            if cs.key_hash not in self.key_hashes:
+                continue
+
+            name = self.key_hashes[cs.key_hash]
+            entity = self.entities[name]
+            if not isinstance(entity, bytes):
+                continue
+
+            pk = nacl.signing.VerifyKey(entity)
+
+            witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
+            try:
+                pk.verify(witness_commitment.encode(), cs.signature)
+            except nacl.exceptions.BadSignatureError:
+                logger.warning('invalid witness cosignature from %s over "%s": %s',
+                               name, witness_commitment, cs.signature.hex())
+                continue
+
+            good.add(name)
+
+        # Because the input policy is already topologically sorted (you can
+        # only refer to entities that are already defined), we can just make a
+        # single pass and collect all the groups that are satisfied as we go.
+        for name, entity in self.entities.items():
+            if isinstance(entity, tuple):
+                cardinality, members = entity
+                if len(members & good) >= cardinality:
+                    good.add(name)
+
+        if self.entry_point not in good:
+            raise QuorumUnsatisfiedError()
+
+
+class SigsumLogAPI:
+    def __init__(self, endpoint: str, pubkey: bytes, quorum: Optional[QuorumPolicy] = None):
+        self.endpoint = endpoint
+        self.pubkey = nacl.signing.VerifyKey(pubkey)
+        self.key_hash = sha256(pubkey)
+
+        self.session = requests.Session()
+        self.session.headers['User-Agent'] = f'sigmon/{SIGMON_VERSION}'
+
+        if quorum:
+            self.quorum = quorum
+        else:
+            self.quorum = QuorumPolicy(OrderedDict(), None)
+
+    @classmethod
+    def from_policy(cls, policy: str, log_filter: Optional[str] = None) -> Self:
+        log = None
+
+        for line in policy.splitlines():
+            if line.startswith('#'):
+                continue
+
+            match line.split():
+                case ['log', key, url]:
+                    if log_filter is not None and log_filter not in url:
+                        continue
+
+                    if log is not None:
+                        raise ValueError('multiple matching log definitions in policy')
+
+                    log = (url, bytes.fromhex(key))
 
         if log is None:
             raise ValueError('no log found in policy')
 
-        if not have_quorum:
-            raise ValueError('quorum not specified')
+        quorum = QuorumPolicy.from_policy(policy)
 
         return cls(*log, quorum)
 
@@ -365,30 +388,9 @@ class SigsumLogAPI:
     def get_tree_head(self) -> TreeHead:
         ascii_ = self.do_request('get-tree-head')
         th = TreeHead.from_ascii(self.key_hash, ascii_)
-        th_commitment = th.commitment()
 
-        self.pubkey.verify(th_commitment.encode(), th.signature)
-
-        if self.quorum is not None:
-            happy_witnesses = []
-            for cs in th.cosignatures:
-                witness = self.quorum.get_witness(cs.key_hash)
-                if witness is None:
-                    continue
-
-                name = witness[0]
-                pk = nacl.signing.VerifyKey(witness[1])
-
-                witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
-                try:
-                    pk.verify(witness_commitment.encode(), cs.signature)
-                    happy_witnesses.append(name)
-                except nacl.exceptions.BadSignatureError:
-                    logger.warning('invalid witness cosignature from %s over "%s": %s',
-                                   name, witness_commitment, cs.signature.hex())
-
-            if not self.quorum.check(happy_witnesses):
-                raise ValueError('quorum not reached')
+        self.pubkey.verify(th.commitment().encode(), th.signature)
+        self.quorum.check(th)
 
         return th
 
