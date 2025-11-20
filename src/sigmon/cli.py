@@ -93,6 +93,7 @@ def build_parser():
     poll_parser = subparsers.add_parser("poll", help="Poll for new log entries")
     poll_parser.add_argument("state_dir", type=Path, help="Path to config/state directory")
     poll_parser.add_argument("--batch-size", type=int, default=None, help="Limit maximum number of leaves to fetch at once")
+    poll_parser.add_argument("--max-stale", type=int, default=None, help="Maximum age of the latest tree head before sending an alert")
     poll_parser.add_argument("-i", "--interval", type=float, metavar="SECONDS", help="Polling interval in seconds. If omitted, do a single poll and exit.")
     poll_parser.add_argument("--log", metavar='URL', help="Select a specific log from the policy file (URL or unique substring thereof)")
 
@@ -259,7 +260,7 @@ def do_poll(args: argparse.Namespace):
 
         while True:
             try:
-                _, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
+                timestamp, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
             except Exception as e:
                 logger.error('poll cycle failed', exc_info=e)
                 break
@@ -274,10 +275,43 @@ def do_poll(args: argparse.Namespace):
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
             state['monitor'] = monitor.get_state()
+            state['health', 'last_success'] = timestamp
             state.save()
 
             if not remaining:
                 break
+
+        last_success = state.get(['health', 'last_success'], None)
+        if last_success is not None and args.max_stale is not None:
+            last_success_age = int(time.time()) - last_success
+            stale_active = state.get(['alerts', 'stale_active'], False)
+
+            env = {
+                'LOG_ENDPOINT': log.endpoint,
+                'TYPE': 'stale',
+                'LAST_SUCCESS_AGE': str(last_success_age),
+                'LAST_SUCCESS': str(last_success),
+            }
+
+            if last_success_age > args.max_stale and not stale_active:
+                logger.error(f'log is stale: last success at {last_success}, {last_success_age} seconds ago')
+
+                env['STATE'] = 'failed'
+                for _ in call_hooks(args.state_dir, 'log_health', env):
+                    pass
+
+                state['alerts', 'stale_active'] = True
+                state.save()
+
+            if last_success_age <= args.max_stale and stale_active:
+                logger.info('log has recovered from being stale')
+
+                env['STATE'] = 'okay'
+                for _ in call_hooks(args.state_dir, 'log_health', env):
+                    pass
+
+                state['alerts', 'stale_active'] = False
+                state.save()
 
         if args.interval is None:
             break
