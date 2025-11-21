@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
-from typing import Optional, Self
+from typing import Optional, Self, cast
 
 import nacl.signing
 import nacl.exceptions
@@ -243,6 +243,11 @@ class QuorumUnsatisfiedError(Exception):
     pass
 
 
+class Quorum:
+    def __init__(self, timestamp: int):
+        self.timestamp = timestamp
+
+
 class QuorumPolicy:
     def __init__(self, entities: OrderedDict[str, bytes|tuple[int, set[str]]], entry_point: Optional[str]):
         self.entities = entities
@@ -316,45 +321,55 @@ class QuorumPolicy:
 
         return quorum
 
-    def check(self, th: TreeHead):
+    def check(self, th: TreeHead) -> Quorum:
         if self.entry_point is None:
-            return
+            if th.cosignatures:
+                timestamp = max([cs.timestamp for cs in th.cosignatures])
+            else:
+                timestamp = int(time.time())
+
+            return Quorum(timestamp)
 
         th_commitment = th.commitment()
 
-        good: set[str] = set()
+        cosignatures: dict[int, set[Cosignature]] = defaultdict(set)
         for cs in th.cosignatures:
             if cs.key_hash not in self.key_hashes:
                 continue
 
-            name = self.key_hashes[cs.key_hash]
-            entity = self.entities[name]
-            if not isinstance(entity, bytes):
-                continue
+            cosignatures[cs.timestamp].add(cs)
 
-            pk = nacl.signing.VerifyKey(entity)
+        good: set[str] = set()
+        for timestamp in sorted(cosignatures.keys(), reverse=True):
+            for cs in cosignatures[timestamp]:
+                name = self.key_hashes[cs.key_hash]
 
-            witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
-            try:
-                pk.verify(witness_commitment.encode(), cs.signature)
-            except nacl.exceptions.BadSignatureError:
-                logger.warning('invalid witness cosignature from %s over "%s": %s',
-                               name, witness_commitment, cs.signature.hex())
-                continue
+                pk_raw = cast(bytes, self.entities[name])
+                pk = nacl.signing.VerifyKey(pk_raw)
 
-            good.add(name)
+                witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
+                try:
+                    pk.verify(witness_commitment.encode(), cs.signature)
+                except nacl.exceptions.BadSignatureError:
+                    logger.warning('invalid witness cosignature from %s over "%s": %s',
+                                   name, witness_commitment, cs.signature.hex())
+                    continue
 
-        # Because the input policy is already topologically sorted (you can
-        # only refer to entities that are already defined), we can just make a
-        # single pass and collect all the groups that are satisfied as we go.
-        for name, entity in self.entities.items():
-            if isinstance(entity, tuple):
-                threshold, members = entity
-                if len(members & good) >= threshold:
-                    good.add(name)
+                good.add(name)
 
-        if self.entry_point not in good:
-            raise QuorumUnsatisfiedError()
+            # Because the input policy is already topologically sorted (you can
+            # only refer to entities that are already defined), we can just make a
+            # single pass and collect all the groups that are satisfied as we go.
+            for name, entity in self.entities.items():
+                if isinstance(entity, tuple):
+                    cardinality, members = entity
+                    if len(members & good) >= cardinality:
+                        good.add(name)
+
+            if self.entry_point in good:
+                return Quorum(timestamp)
+
+        raise QuorumUnsatisfiedError()
 
 
 class SigsumLogAPI:
