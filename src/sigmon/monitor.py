@@ -116,10 +116,11 @@ class Monitor:
             }
         }
 
-    def poll(self, batch_size: Optional[int] = None) -> tuple[int, list[TreeLeaf], int]:
-        th, _ = self.log.get_tree_head()
+    def poll(self, batch_size: Optional[int] = None) -> tuple[int, int, list[TreeLeaf], int]:
+        th, quorum = self.log.get_tree_head()
+
         if th.size == self.tree.size:
-            return self.tree.size, [], 0
+            return quorum.timestamp, self.tree.size, [], 0
 
         logger.debug('tree increased from %d to %d, fetching leaves', self.tree.size, th.size)
 
@@ -148,4 +149,4 @@ class Monitor:
         logger.debug('validated head moved from %d to %d', self.tree.size, new_tree.size)
         self.tree = new_tree
 
-        return range_start, leaves, th.size - self.tree.size
+        return quorum.timestamp, range_start, leaves, th.size - self.tree.size

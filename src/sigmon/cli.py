@@ -259,7 +259,7 @@ def do_poll(args: argparse.Namespace):
 
         while True:
             try:
-                start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
+                _, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
             except Exception as e:
                 logger.error('poll cycle failed', exc_info=e)
                 break
