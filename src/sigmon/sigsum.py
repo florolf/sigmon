@@ -398,14 +398,14 @@ class SigsumLogAPI:
             resp.raise_for_status()
             return resp.text
 
-    def get_tree_head(self) -> TreeHead:
+    def get_tree_head(self) -> tuple[TreeHead, Quorum]:
         ascii_ = self.do_request('get-tree-head')
         th = TreeHead.from_ascii(self.key_hash, ascii_)
 
         self.pubkey.verify(th.commitment().encode(), th.signature)
-        self.quorum.check(th)
+        quorum = self.quorum.check(th)
 
-        return th
+        return (th, quorum)
 
     def get_leaves(self, start: int, end: int) -> list[TreeLeaf]:
         ascii_ = self.do_request('get-leaves', start, end)

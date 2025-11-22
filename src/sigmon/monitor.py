@@ -71,7 +71,7 @@ class Monitor:
         if start_index == 0:
             return cls(log, MerkleTree(0, []))
 
-        th = log.get_tree_head()
+        th, _ = log.get_tree_head()
 
         tail = False
         if start_index is None:
@@ -117,7 +117,7 @@ class Monitor:
         }
 
     def poll(self, batch_size: Optional[int] = None) -> tuple[int, list[TreeLeaf], int]:
-        th = self.log.get_tree_head()
+        th, _ = self.log.get_tree_head()
         if th.size == self.tree.size:
             return self.tree.size, [], 0
 
