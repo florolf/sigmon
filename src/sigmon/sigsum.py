@@ -138,9 +138,36 @@ class ConsistencyProof:
         return f"ConsistencyProof(old_size={self.old_size}, new_size={self.new_size}, node_hashes=[{hashes}]"
 
     def check(self, old_hash: bytes, new_hash: bytes) -> bool:
-        # RFC 9162,  2.1.4.2. Verifying Consistency between Two Tree Heads
+        # This function is a literal translation of RFC 9162, section 2.1.4.2.
+        # "Verifying Consistency between Two Tree Heads", except for the
+        # following block.
+        #
+        # We add this since the RFC verification algorithm has the precondition
+        # 0 < old_size < new_size, which implies that there is something to
+        # prove. However there are two trivial cases that still make sense to
+        # consider here for consistency even though they don't happen in real
+        # Sigsum protocol interactions:
+        #
+        #  - old_size == new_size and old_hash == new_hash, i.e. a tree head is
+        #    consistent with itself
+        #
+        #  - an empty tree (old_size == 0, old_hash = MTH({}) = HASH()) is
+        #    consistent with everything
+        #
+        # In those cases, there is nothing to prove and thus node_hashes is
+        # empty.
 
-        # RFC names from here on
+        if not self.node_hashes:
+            if self.old_size == self.new_size and old_hash == new_hash:
+                return True
+
+            if self.old_size == 0 and old_hash == sha256(b''):
+                return True
+
+        if not (0 < self.old_size < self.new_size):
+            return False
+
+        # RFC names and logic from here on
         consistency_path = self.node_hashes.copy()
         first = self.old_size
         second = self.new_size
