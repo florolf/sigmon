@@ -275,6 +275,8 @@ class QuorumPolicy:
                         threshold = 1
                     else:
                         threshold = int(threshold)
+                        if not (1 <= threshold <= len(members)):
+                            raise ValueError(f'group "{name}" has invalid threshold')
 
                     for member in members:
                         if member not in entities:
