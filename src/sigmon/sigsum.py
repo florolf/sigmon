@@ -259,7 +259,7 @@ class QuorumPolicy:
 
                     entities[name] = bytes.fromhex(pubkey)
 
-                case ['group', name, cardinality, *members]:
+                case ['group', name, threshold, *members]:
                     if name == 'none':
                         raise ValueError('quorum entity name "none" is reserved')
 
@@ -269,18 +269,18 @@ class QuorumPolicy:
                     if len(members) == 0:
                         raise ValueError(f'group "{name}" has no members')
 
-                    if cardinality == 'all':
-                        cardinality = len(members)
-                    elif cardinality == 'any':
-                        cardinality = 1
+                    if threshold == 'all':
+                        threshold = len(members)
+                    elif threshold == 'any':
+                        threshold = 1
                     else:
-                        cardinality = int(cardinality)
+                        threshold = int(threshold)
 
                     for member in members:
                         if member not in entities:
                             raise ValueError(f'group "{name}" refers to unknown entity "{member}"')
 
-                    entities[name] = (cardinality, set(members))
+                    entities[name] = (threshold, set(members))
 
         if quorum is None:
             raise ValueError('quorum not specified')
@@ -320,8 +320,8 @@ class QuorumPolicy:
         # single pass and collect all the groups that are satisfied as we go.
         for name, entity in self.entities.items():
             if isinstance(entity, tuple):
-                cardinality, members = entity
-                if len(members & good) >= cardinality:
+                threshold, members = entity
+                if len(members & good) >= threshold:
                     good.add(name)
 
         if self.entry_point not in good:
