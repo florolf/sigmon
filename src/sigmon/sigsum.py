@@ -296,7 +296,11 @@ class QuorumPolicy:
 
     def check(self, th: TreeHead) -> Quorum:
         if self.entry_point is None:
-            timestamp = max([cs.timestamp for cs in th.cosignatures])
+            if th.cosignatures:
+                timestamp = max([cs.timestamp for cs in th.cosignatures])
+            else:
+                timestamp = int(time.time())
+
             return Quorum(timestamp)
 
         th_commitment = th.commitment()
