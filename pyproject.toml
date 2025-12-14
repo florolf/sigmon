@@ -13,6 +13,11 @@ dependencies = [
  "requests>=2.32.4",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.1",
+]
+
 [project.scripts]
 sigmon = "sigmon.cli:main"
 
@@ -22,3 +27,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "src/sigmon/__about__.py"
+
+[tool.pytest]
+strict = true
