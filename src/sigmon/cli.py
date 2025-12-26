@@ -77,6 +77,13 @@ class State:
         d = self.get_dict(path[:-1])
         d[path[-1]] = value
 
+    def __contains__(self, path):
+        if not isinstance(path, tuple):
+            path = (path,)
+
+        d = self.get_dict(path[:-1])
+        return path[-1] in d
+
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="sigmon", description="Monitor Sigsum logs")
