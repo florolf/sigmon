@@ -88,10 +88,13 @@ class TreeLeaf:
     key_hash: bytes
 
     def leaf_hash(self):
-        return sha256(b'\x00' + self.checksum + self.signature + self.key_hash)
+        return sha256(b'\x00' + self.serialize())
 
     def __str__(self):
         return f"TreeLeaf(checksum={self.checksum.hex()}, key_hash={self.key_hash.hex()}, signature={self.signature.hex()})"
+
+    def serialize(self):
+        return self.checksum + self.signature + self.key_hash
 
 
 @dataclass(frozen=True)
