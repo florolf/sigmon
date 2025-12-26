@@ -4,7 +4,7 @@ import logging
 import copy
 from typing import Optional, Self, Any
 
-from .sigsum import SigsumLogAPI, TreeLeaf
+from .sigsum import SigsumLogAPI, TreeLeaf, TreeHead
 from .utils import sha256
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class Monitor:
         if start_index == 0:
             return cls(log, MerkleTree(0, []))
 
-        th, _ = log.get_tree_head()
+        th = log.get_tree_head()
 
         tail = False
         if start_index is None:
@@ -116,11 +116,11 @@ class Monitor:
             }
         }
 
-    def poll(self, batch_size: Optional[int] = None) -> tuple[int, int, list[TreeLeaf], int]:
-        th, quorum = self.log.get_tree_head()
+    def poll(self, batch_size: Optional[int] = None) -> tuple[TreeHead, int, list[TreeLeaf], int]:
+        th = self.log.get_tree_head()
 
         if th.size == self.tree.size:
-            return quorum.timestamp, self.tree.size, [], 0
+            return th, self.tree.size, [], 0
 
         logger.debug('tree increased from %d to %d, fetching leaves', self.tree.size, th.size)
 
@@ -149,4 +149,4 @@ class Monitor:
         logger.debug('validated head moved from %d to %d', self.tree.size, new_tree.size)
         self.tree = new_tree
 
-        return quorum.timestamp, range_start, leaves, th.size - self.tree.size
+        return th, range_start, leaves, th.size - self.tree.size

@@ -13,7 +13,7 @@ import subprocess
 import nacl.signing
 import nacl.exceptions
 
-from .sigsum import SigsumLogAPI, TreeLeaf
+from .sigsum import SigsumLogAPI, TreeLeaf, QuorumPolicy
 from .monitor import Monitor
 from .utils import sha256
 
@@ -230,7 +230,10 @@ def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], lea
 
 def do_poll(args: argparse.Namespace):
     with open(args.state_dir / 'policy', 'r') as f:
-        log = SigsumLogAPI.from_policy(f.read(), log_filter=args.log)
+        policy_text = f.read()
+
+        log = SigsumLogAPI.from_policy(policy_text, log_filter=args.log)
+        policy = QuorumPolicy.from_policy(policy_text)
 
     state = State(args.state_dir / 'log' / f'{bytes(log.pubkey).hex()}.json')
     state.load()
@@ -253,7 +256,8 @@ def do_poll(args: argparse.Namespace):
 
         while True:
             try:
-                timestamp, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
+                th, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
+                quorum = policy.check(th)
             except Exception as e:
                 logger.error('poll cycle failed', exc_info=e)
                 break
@@ -268,7 +272,7 @@ def do_poll(args: argparse.Namespace):
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
             state['monitor'] = monitor.get_state()
-            state['health', 'last_success'] = timestamp
+            state['health', 'last_success'] = quorum.timestamp
             state.save()
 
             if not remaining:

@@ -376,18 +376,13 @@ class QuorumPolicy:
 
 
 class SigsumLogAPI:
-    def __init__(self, endpoint: str, pubkey: bytes, quorum: Optional[QuorumPolicy] = None):
+    def __init__(self, endpoint: str, pubkey: bytes):
         self.endpoint = endpoint
         self.pubkey = nacl.signing.VerifyKey(pubkey)
         self.key_hash = sha256(pubkey)
 
         self.session = requests.Session()
         self.session.headers['User-Agent'] = f'sigmon/{SIGMON_VERSION}'
-
-        if quorum:
-            self.quorum = quorum
-        else:
-            self.quorum = QuorumPolicy(OrderedDict(), None)
 
     @classmethod
     def from_policy(cls, policy: str, log_filter: Optional[str] = None) -> Self:
@@ -410,9 +405,7 @@ class SigsumLogAPI:
         if log is None:
             raise ValueError('no log found in policy')
 
-        quorum = QuorumPolicy.from_policy(policy)
-
-        return cls(*log, quorum)
+        return cls(*log)
 
     def do_request(self, *args, timeout=60) -> str:
         url = '/'.join([self.endpoint, *[str(x) for x in args]])
@@ -432,14 +425,13 @@ class SigsumLogAPI:
             resp.raise_for_status()
             return resp.text
 
-    def get_tree_head(self) -> tuple[TreeHead, Quorum]:
+    def get_tree_head(self) -> TreeHead:
         ascii_ = self.do_request('get-tree-head')
         th = TreeHead.from_ascii(self.key_hash, ascii_)
 
         self.pubkey.verify(th.commitment().encode(), th.signature)
-        quorum = self.quorum.check(th)
 
-        return (th, quorum)
+        return th
 
     def get_leaves(self, start: int, end: int) -> list[TreeLeaf]:
         ascii_ = self.do_request('get-leaves', start, end)
