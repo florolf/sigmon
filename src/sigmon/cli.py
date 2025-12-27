@@ -8,7 +8,6 @@ import os
 import time
 from typing import Any, Optional
 from pathlib import Path
-import tempfile
 import subprocess
 
 import nacl.signing
@@ -17,6 +16,8 @@ import nacl.exceptions
 from .sigsum import SigsumLogAPI, TreeLeaf
 from .monitor import Monitor
 from .utils import sha256
+
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -30,23 +31,8 @@ class State:
             self.data = json.load(f)
 
     def save(self):
-        path = self.path.resolve()
-
-        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
-            json.dump(self.data, f, sort_keys=True, indent=True)
-            f.flush()
-            os.fsync(f.fileno())
-            tmp = f.name
-
-        try:
-            os.replace(tmp, path)
-        except:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-
-            raise
+        data = json.dumps(self.data, sort_keys=True, indent=True)
+        utils.atomic_write(self.path, data.encode())
 
     def get_dict(self, path):
         cur = self.data
