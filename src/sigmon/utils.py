@@ -18,6 +18,13 @@ def sha256(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
 
 
+def sync_write(dst: Path, data: bytes) -> None:
+    with dst.open('wb') as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+
 def atomic_write(path: Path, data: bytes) -> None:
     path = path.resolve()
 
