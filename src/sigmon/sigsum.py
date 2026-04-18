@@ -76,6 +76,27 @@ class Cosignature:
     def __str__(self):
         return f"Cosignature(key_hash={self.key_hash.hex()}, timestamp={self.timestamp}, signature={self.signature.hex()})"
 
+    def verify(self, th: 'TreeHead', key: Optional[SigsumKey] = None):
+        if key is None:
+            key = SigsumKey.lookup(self.key_hash)
+            if key is None:
+                raise RuntimeError(f'failed dynamic key lookup for keyhash {self.key_hash.hex()}')
+        else:
+            if key.key_hash != self.key_hash:
+                raise ValueError(f'tried to verify cosignature with key_hash {self.key_hash.hex()} against mismatched key {key}')
+
+        th_commitment = th.commitment()
+        witness_commitment = f"cosignature/v1\ntime {self.timestamp}\n{th_commitment}"
+        try:
+            key.verify(witness_commitment.encode(), self.signature)
+        except nacl.exceptions.BadSignatureError:
+            raise CosignatureInvalidError('failed to verify cosignature from %s over "%s": %s' %
+                                          (key, witness_commitment, self.signature.hex()))
+
+
+class CosignatureInvalidError(Exception):
+    pass
+
 
 @dataclass(frozen=True)
 class TreeHead:
@@ -117,6 +138,9 @@ class TreeHead:
 
     def commitment(self) -> str:
         return f"{self.origin}\n{self.size}\n{b64enc(self.root_hash)}\n"
+
+    def verify(self, key: SigsumKey):
+        key.verify(self.commitment().encode(), self.signature)
 
 
 @dataclass(frozen=True)
@@ -371,8 +395,6 @@ class QuorumPolicy:
 
             return Quorum(timestamp)
 
-        th_commitment = th.commitment()
-
         cosignatures: dict[int, set[Cosignature]] = defaultdict(set)
         for cs in th.cosignatures:
             if cs.key_hash not in self.key_names:
@@ -384,13 +406,11 @@ class QuorumPolicy:
         for timestamp in sorted(cosignatures.keys(), reverse=True):
             for cs in cosignatures[timestamp]:
                 name = self.key_names[cs.key_hash]
-                pk = cast(SigsumKey, self.entities[name])
-                witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
+                witness_key = cast(SigsumKey, self.entities[name])
                 try:
-                    pk.verify(witness_commitment.encode(), cs.signature)
-                except nacl.exceptions.BadSignatureError:
-                    logger.warning('invalid witness cosignature from %s over "%s": %s',
-                                   name, witness_commitment, cs.signature.hex())
+                    cs.verify(th, witness_key)
+                except CosignatureInvalidError as e:
+                    logger.warning('invalid witness cosignature by %s: %s', name, e)
                     continue
 
                 good.add(name)
@@ -462,8 +482,7 @@ class SigsumLogAPI:
     def get_tree_head(self) -> TreeHead:
         ascii_ = self.do_request('get-tree-head')
         th = TreeHead.from_ascii(self.pubkey.key_hash, ascii_)
-
-        self.pubkey.verify(th.commitment().encode(), th.signature)
+        th.verify(self.pubkey)
 
         return th
 

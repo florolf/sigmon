@@ -38,7 +38,7 @@ def test_parse_treehead():
     assert th.root_hash == bytes.fromhex('4ccedda0c3e6afc83cfcddfad7df3d95cbd1e857ecf3cf0569b8f69ce32727f8')
     assert len(th.cosignatures) == 17
 
-    LOG_KEY.verify(th.commitment().encode(), th.signature)
+    th.verify(LOG_KEY)
 
 def test_parse_treehead_no_cosig():
     ascii_ = dedent("""
