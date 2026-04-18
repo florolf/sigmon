@@ -13,7 +13,7 @@ import subprocess
 import nacl.signing
 import nacl.exceptions
 
-from .sigsum import SigsumLogAPI, TreeLeaf, QuorumPolicy
+from .sigsum import SigsumLogAPI, TreeLeaf, QuorumPolicy, QuorumUnsatisfiedError
 from .monitor import Monitor
 from .utils import sha256
 
@@ -255,9 +255,9 @@ def do_poll(args: argparse.Namespace):
                 watchlist_ts = mtime
 
         while True:
+            th = None
             try:
                 th, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
-                quorum = policy.check(th)
             except Exception as e:
                 logger.error('poll cycle failed', exc_info=e)
                 break
@@ -272,11 +272,18 @@ def do_poll(args: argparse.Namespace):
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
             state['monitor'] = monitor.get_state()
-            state['health', 'last_success'] = quorum.timestamp
             state.save()
 
             if not remaining:
                 break
+
+        if th is not None:
+            try:
+                quorum = policy.check(th)
+                state['health', 'last_success'] = quorum.timestamp
+                state.save()
+            except QuorumUnsatisfiedError:
+                logging.error(f'quorum not satisfied for treehead {th}')
 
         last_success = state.get(['health', 'last_success'], None)
         if last_success is not None and args.max_stale is not None:
