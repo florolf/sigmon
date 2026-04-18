@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import logging
+from os import name
 import time
+import dataclasses
 from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
-from typing import Optional, Self, cast
+from typing import Optional, Self, ClassVar, cast
 
 import nacl.signing
 import nacl.exceptions
@@ -27,6 +29,42 @@ def parse_ascii(doc: str) -> dict[str, list[list[str]]]:
         out[key].append(value.split())
 
     return out
+
+
+class SigsumKey:
+    __slots__ = ('key', 'key_hash')
+    _dictionary: ClassVar[dict[bytes, Self]] = {}
+
+    def __new__(cls, key: bytes) -> Self:
+        if len(key) != 32:
+            raise ValueError('invalid key length %d (expected 32)' % len(key))
+
+        key_hash = sha256(key)
+        if key_hash in cls._dictionary:
+            return cls._dictionary[key_hash]
+
+        obj = super().__new__(cls)
+        obj.key = key
+        obj.key_hash = key_hash
+
+        cls._dictionary[key_hash] = obj
+
+        return obj
+
+    def verify(self, data: bytes, signature: bytes) -> None:
+        pk = nacl.signing.VerifyKey(self.key)
+        pk.verify(data, signature)
+
+    @classmethod
+    def lookup(cls, key_hash: bytes) -> Optional[Self]:
+        return cls._dictionary.get(key_hash, None)
+
+    @classmethod
+    def register(cls, key: bytes) -> None:
+        SigsumKey(key)
+
+    def __str__(self) -> str:
+        return f"SigsumKey(key={self.key.hex()}, hash={self.key_hash.hex()})"
 
 
 @dataclass(frozen=True)
@@ -252,16 +290,16 @@ class Quorum:
 
 
 class QuorumPolicy:
-    def __init__(self, entities: OrderedDict[str, bytes|tuple[int, set[str]]], entry_point: Optional[str]):
+    def __init__(self, entities: OrderedDict[str, SigsumKey|tuple[int, set[str]]], entry_point: Optional[str]):
         self.entities = entities
         self.entry_point = entry_point
 
-        self.key_hashes = {}
+        self.key_names = {}
         for name, entity in entities.items():
-            if not isinstance(entity, bytes):
+            if not isinstance(entity, SigsumKey):
                 continue
 
-            self.key_hashes[sha256(entity)] = name
+            self.key_names[entity.key_hash] = name
 
     @classmethod
     def from_policy(cls, policy: str) -> Self:
@@ -292,7 +330,7 @@ class QuorumPolicy:
                     if name in entities:
                         raise ValueError(f'quorum entity "{name}" already exists')
 
-                    entities[name] = bytes.fromhex(pubkey)
+                    entities[name] = SigsumKey(bytes.fromhex(pubkey))
 
                 case ['group', name, threshold, *members]:
                     if name == 'none':
@@ -337,7 +375,7 @@ class QuorumPolicy:
 
         cosignatures: dict[int, set[Cosignature]] = defaultdict(set)
         for cs in th.cosignatures:
-            if cs.key_hash not in self.key_hashes:
+            if cs.key_hash not in self.key_names:
                 continue
 
             cosignatures[cs.timestamp].add(cs)
@@ -345,11 +383,8 @@ class QuorumPolicy:
         good: set[str] = set()
         for timestamp in sorted(cosignatures.keys(), reverse=True):
             for cs in cosignatures[timestamp]:
-                name = self.key_hashes[cs.key_hash]
-
-                pk_raw = cast(bytes, self.entities[name])
-                pk = nacl.signing.VerifyKey(pk_raw)
-
+                name = self.key_names[cs.key_hash]
+                pk = cast(SigsumKey, self.entities[name])
                 witness_commitment = f"cosignature/v1\ntime {cs.timestamp}\n{th_commitment}"
                 try:
                     pk.verify(witness_commitment.encode(), cs.signature)
@@ -378,8 +413,7 @@ class QuorumPolicy:
 class SigsumLogAPI:
     def __init__(self, endpoint: str, pubkey: bytes):
         self.endpoint = endpoint
-        self.pubkey = nacl.signing.VerifyKey(pubkey)
-        self.key_hash = sha256(pubkey)
+        self.pubkey = SigsumKey(pubkey)
 
         self.session = requests.Session()
         self.session.headers['User-Agent'] = f'sigmon/{SIGMON_VERSION}'
@@ -427,7 +461,7 @@ class SigsumLogAPI:
 
     def get_tree_head(self) -> TreeHead:
         ascii_ = self.do_request('get-tree-head')
-        th = TreeHead.from_ascii(self.key_hash, ascii_)
+        th = TreeHead.from_ascii(self.pubkey.key_hash, ascii_)
 
         self.pubkey.verify(th.commitment().encode(), th.signature)
 

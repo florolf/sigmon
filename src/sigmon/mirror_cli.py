@@ -41,7 +41,7 @@ def do_init(args: argparse.Namespace):
         logger.error(f"{args.mirror_dir} already exists")
         sys.exit(1)
 
-    origin = f'sigsum.org/v1/tree/{sha256(bytes(log.pubkey)).hex()}'
+    origin = f'sigsum.org/v1/tree/{sha256(bytes(log.pubkey.key)).hex()}'
     tiles.Tiles.new_empty(args.mirror_dir, origin)
 
     sigmon_dir = args.mirror_dir / '.sigmon'
@@ -74,7 +74,7 @@ def do_poll(args: argparse.Namespace):
     quorum = QuorumPolicy.from_policy(policy)
 
     tiles_state = tiles.Tiles(args.mirror_dir)
-    log_vkey = tiles.FakeVKey(log.endpoint.split('//')[1], bytes(log.pubkey), False)
+    log_vkey = tiles.FakeVKey(log.endpoint.split('//')[1], bytes(log.pubkey.key), False)
 
     witness_vkeys: dict[bytes, tiles.FakeVKey] = {}
     for name, entity in quorum.entities.items():

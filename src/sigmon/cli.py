@@ -150,7 +150,7 @@ def do_init(args: argparse.Namespace):
     log_dir = args.state_dir / 'log'
     log_dir.mkdir(exist_ok=True)
 
-    state_file = log_dir / f'{bytes(log.pubkey).hex()}.json'
+    state_file = log_dir / f'{bytes(log.pubkey.key).hex()}.json'
     if state_file.exists() and not args.force:
         logger.error("%s exists and --force is not given", state_file)
         sys.exit(1)
@@ -235,7 +235,7 @@ def do_poll(args: argparse.Namespace):
         log = SigsumLogAPI.from_policy(policy_text, log_filter=args.log)
         policy = QuorumPolicy.from_policy(policy_text)
 
-    state = State(args.state_dir / 'log' / f'{bytes(log.pubkey).hex()}.json')
+    state = State(args.state_dir / 'log' / f'{bytes(log.pubkey.key).hex()}.json')
     state.load()
 
     watchlist = args.state_dir / 'watchlist'

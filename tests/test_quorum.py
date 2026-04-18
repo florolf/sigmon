@@ -2,13 +2,11 @@ from textwrap import dedent
 
 import pytest
 
-from sigmon.sigsum import TreeHead, QuorumPolicy, QuorumUnsatisfiedError
-from sigmon.utils import sha256
+from sigmon.sigsum import TreeHead, QuorumPolicy, QuorumUnsatisfiedError, SigsumKey
 
-LOG_KEY_RAW = bytes.fromhex('0ec7e16843119b120377a73913ac6acbc2d03d82432e2c36b841b09a95841f25')
-LOG_KEY_HASH = sha256(LOG_KEY_RAW)
+LOG_KEY = SigsumKey(bytes.fromhex('0ec7e16843119b120377a73913ac6acbc2d03d82432e2c36b841b09a95841f25'))
 
-TREE_HEAD = TreeHead.from_ascii(LOG_KEY_HASH, """
+TREE_HEAD = TreeHead.from_ascii(LOG_KEY.key_hash, """
 size=12851
 root_hash=4ccedda0c3e6afc83cfcddfad7df3d95cbd1e857ecf3cf0569b8f69ce32727f8
 signature=880207e73dbe7aa11ebab8118d4da67e59a2ff29d9b11e98b8d5d4062dbd4d12765b5389b4f0583130fa8573cf997d60b94c9e4d700469aba5a9f4383f619509
@@ -137,7 +135,7 @@ def test_invalid_quorum_rule():
             QuorumPolicy.from_policy(dedent(pol))
 
 def test_invalid_cosignature():
-    th = TreeHead.from_ascii(LOG_KEY_HASH, dedent("""
+    th = TreeHead.from_ascii(LOG_KEY.key_hash, dedent("""
     size=12851
     root_hash=4ccedda0c3e6afc83cfcddfad7df3d95cbd1e857ecf3cf0569b8f69ce32727f8
     signature=880207e73dbe7aa11ebab8118d4da67e59a2ff29d9b11e98b8d5d4062dbd4d12765b5389b4f0583130fa8573cf997d60b94c9e4d700469aba5a9f4383f619509

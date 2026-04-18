@@ -3,12 +3,10 @@ from textwrap import dedent
 import pytest
 import nacl.signing
 
-from sigmon.sigsum import TreeHead, InclusionProof
+from sigmon.sigsum import SigsumKey, TreeHead, InclusionProof
 from sigmon.utils import sha256
 
-LOG_KEY_RAW = bytes.fromhex('0ec7e16843119b120377a73913ac6acbc2d03d82432e2c36b841b09a95841f25')
-LOG_KEY_HASH = sha256(LOG_KEY_RAW)
-LOG_KEY = nacl.signing.VerifyKey(LOG_KEY_RAW)
+LOG_KEY = SigsumKey(bytes.fromhex('0ec7e16843119b120377a73913ac6acbc2d03d82432e2c36b841b09a95841f25'))
 
 
 def test_parse_treehead():
@@ -35,7 +33,7 @@ def test_parse_treehead():
     cosignature=ff2f237a707a2d3a6adfb1600d3375cafe4527ba4fcec793e6093b9b1a4bd79a 1754020861 308e724f50b9ada63a2bfd9b0143345aa1ea3a793d4db4de1e4842d9643d926b8a6711017482f5bebbfb0fefe4e3f620151b5ef020ad30569595094563465000
     """)
 
-    th = TreeHead.from_ascii(LOG_KEY_HASH, ascii_)
+    th = TreeHead.from_ascii(LOG_KEY.key_hash, ascii_)
     assert th.size == 12851
     assert th.root_hash == bytes.fromhex('4ccedda0c3e6afc83cfcddfad7df3d95cbd1e857ecf3cf0569b8f69ce32727f8')
     assert len(th.cosignatures) == 17
@@ -49,7 +47,7 @@ def test_parse_treehead_no_cosig():
     signature=880207e73dbe7aa11ebab8118d4da67e59a2ff29d9b11e98b8d5d4062dbd4d12765b5389b4f0583130fa8573cf997d60b94c9e4d700469aba5a9f4383f619509
     """)
 
-    TreeHead.from_ascii(LOG_KEY_HASH, ascii_)
+    TreeHead.from_ascii(LOG_KEY.key_hash, ascii_)
 
 
 def test_parse_treehead_bad():
@@ -60,7 +58,7 @@ def test_parse_treehead_bad():
     """)
 
     with pytest.raises(Exception):
-        TreeHead.from_ascii(LOG_KEY_HASH, ascii_)
+        TreeHead.from_ascii(LOG_KEY.key_hash, ascii_)
 
 
 def test_parse_inclusion_proof():
