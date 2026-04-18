@@ -96,7 +96,6 @@ def do_poll(args: argparse.Namespace):
         while True:
             try:
                 th, start_idx, leaves, remaining = monitor.poll(batch_size=args.batch_size)
-                quorum.check(th)
             except Exception as e:
                 logger.error('poll cycle failed', exc_info=e)
                 if args.interval is None:
