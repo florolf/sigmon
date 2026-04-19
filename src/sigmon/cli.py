@@ -281,9 +281,23 @@ def do_poll(args: argparse.Namespace):
             try:
                 quorum = policy.check(th)
                 state['health', 'last_success'] = quorum.timestamp
-                state.save()
             except QuorumUnsatisfiedError:
                 logging.error(f'quorum not satisfied for treehead {th}')
+
+            for cs in th.cosignatures:
+                if not cs.valid:
+                    continue
+
+                key_hash = cs.key_hash.hex()
+                old = state.get(['health', 'cs', key_hash], None)
+                if old is None or old['ts'] <= cs.timestamp:
+                    state['health', 'cs', key_hash] = {
+                        'ts': cs.timestamp,
+                        'size': th.size
+                    }
+
+            state.save()
+
 
         last_success = state.get(['health', 'last_success'], None)
         if last_success is not None and args.max_stale is not None:
