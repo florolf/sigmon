@@ -16,3 +16,15 @@ def fake_log(monkeypatch) -> FakeSigsumLog:
     monkeypatch.setattr(cli, 'SigsumLogAPI', _StubAPI)
 
     return log
+
+
+@pytest.fixture
+def state_dir(tmp_path, fake_log):
+    policy = (
+        f'{fake_log.policy_line()}\n'
+        f'quorum none\n'
+    )
+    (tmp_path / 'policy').write_text(policy)
+    (tmp_path / 'watchlist').write_text('')
+
+    return tmp_path
