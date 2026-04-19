@@ -1,5 +1,7 @@
 from typing import Optional
 
+import nacl.signing
+
 from sigmon.utils import sha256
 from sigmon.sigsum import TreeLeaf
 
@@ -74,4 +76,16 @@ def make_leaf(n: int, key_hash: Optional[bytes] = None) -> TreeLeaf:
         checksum=blob,
         signature=blob * 2,
         key_hash=key_hash if key_hash is not None else blob
+    )
+
+
+def make_valid_leaf(n: int, key: nacl.signing.SigningKey) -> TreeLeaf:
+    blob = bytes([n]) * 32
+    data = b'sigsum.org/v1/tree-leaf\x00' + blob
+    signature = key.sign(data).signature
+
+    return TreeLeaf(
+        checksum=blob,
+        signature=signature,
+        key_hash=sha256(bytes(key.verify_key))
     )

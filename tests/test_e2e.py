@@ -1,10 +1,13 @@
 import argparse
 from pathlib import Path
 
+import nacl.signing
+
 from sigmon import cli
+from sigmon.utils import sha256
 
 from fake_log import FakeSigsumLog, FakeWitness
-from utils import make_leaf
+from utils import make_leaf, make_valid_leaf
 
 def _make_hook(state_dir: Path, hook_type: str, name: str, body: str) -> None:
     hook_dir = state_dir / 'hooks' / hook_type
@@ -58,6 +61,35 @@ def test_do_poll_fires_match_hook(state_dir: Path, fake_log: FakeSigsumLog):
     assert lines == [
         f'1 {target_kh.hex()} target',
         f'3 {target_kh.hex()} target',
+    ]
+
+
+def test_do_poll_check_sig(state_dir: Path, fake_log: FakeSigsumLog):
+    cli.do_init(_init_args(state_dir, leaf_index=0))
+
+    leaf_key = nacl.signing.SigningKey.generate()
+
+    (state_dir / 'watchlist').write_text(
+        f'key {bytes(leaf_key.verify_key).hex()} alias=target\n'
+    )
+    _make_hook(
+        state_dir,
+        'match',
+        'record',
+        'echo "$LEAF_INDEX $LEAF_SIGNATURE_VALID" >> matches.log',
+    )
+
+    fake_log.append(make_leaf(0, key_hash=b'\xaa' * 32))
+    fake_log.append(make_valid_leaf(1, leaf_key))
+    fake_log.append(make_leaf(2, key_hash=b'\xbb' * 32))
+    fake_log.append(make_leaf(3, key_hash=sha256(bytes(leaf_key.verify_key))))
+
+    cli.do_poll(_poll_args(state_dir))
+
+    lines = (state_dir / 'matches.log').read_text().splitlines()
+    assert lines == [
+        f'1 1',
+        f'3 0',
     ]
 
 
