@@ -72,14 +72,35 @@ class Monitor:
             return cls(log, MerkleTree(0, []))
 
         th = log.get_tree_head()
+        if start_index is not None:
+            if start_index >= th.size:
+                raise ValueError(f'start index {start_index} exceeds current tree size {th.size}')
+
+        # Log sizes of 0 and 1 are special, since we cannot use the inclusion
+        # proof base bootstrapping method below because there is nothing to
+        # prove (indeed, the log API will reject requests with size <= 1).
+        # Handle each case individually:
+        if th.size == 0:
+            # start_index has to be None here since 0 would have been handled
+            # above and any value >= 1 would have triggered the size sanity check.
+            # Thus, we want to tail starting from an empty tree.
+
+            return cls(log, MerkleTree(0, []))
+        elif th.size == 1:
+            # start_index has to be None here for the same reasons as above.
+            # Insert the single entry into our tree state manually so that we
+            # start tailing from there.
+
+            mt = MerkleTree(0, [])
+            leaf = log.get_leaves(0, 1)[0]
+            mt.add_leaf(leaf.leaf_hash())
+
+            return cls(log, mt)
 
         tail = False
         if start_index is None:
             start_index = th.size - 1
             tail = True
-        else:
-            if start_index >= th.size:
-                raise ValueError(f'start index {start_index} exceeds current tree size {th.size}')
 
         # The inclusion proof of the last entry of the log for a given tree
         # size is the sequence of left siblings on the path up to the root.
