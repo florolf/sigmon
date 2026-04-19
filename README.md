@@ -1,6 +1,6 @@
 # sigmon
 
-*Note: This is still experimental software, rely on it at your own risk*
+*Note: This software is still under development and compatibility breaks might happen at any point*
 
 This is a small [sigsum](https://sigsum.org) monitor. It watches a log for signatures made with keys of interest and can execute hooks when a matching signature is detected to notify interested parties of that fact.
 
