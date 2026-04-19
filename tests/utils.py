@@ -1,4 +1,7 @@
+from typing import Optional
+
 from sigmon.utils import sha256
+from sigmon.sigsum import TreeLeaf
 
 def split(n: int) -> int:
     """
@@ -63,3 +66,12 @@ def consistency_proof(m: int, d: list[bytes]) -> list[bytes]:
 
     assert 0 < m <= len(d)
     return subproof(m, d, True)
+
+
+def make_leaf(n: int, key_hash: Optional[bytes] = None) -> TreeLeaf:
+    blob = bytes([n]) * 32
+    return TreeLeaf(
+        checksum=blob,
+        signature=blob * 2,
+        key_hash=key_hash if key_hash is not None else blob
+    )
