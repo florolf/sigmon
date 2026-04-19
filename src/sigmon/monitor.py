@@ -77,6 +77,9 @@ class Monitor:
         if start_index is None:
             start_index = th.size - 1
             tail = True
+        else:
+            if start_index >= th.size:
+                raise ValueError(f'start index {start_index} exceeds current tree size {th.size}')
 
         # The inclusion proof of the last entry of the log for a given tree
         # size is the sequence of left siblings on the path up to the root.
