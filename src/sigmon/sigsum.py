@@ -73,8 +73,13 @@ class Cosignature:
     timestamp: int
     signature: bytes
 
+    valid: Optional[bool] = dataclasses.field(default=None, init=False, repr=False, compare=False)
+
     def __str__(self):
-        return f"Cosignature(key_hash={self.key_hash.hex()}, timestamp={self.timestamp}, signature={self.signature.hex()})"
+        if self.valid is not None:
+            return f"Cosignature(key_hash={self.key_hash.hex()}, timestamp={self.timestamp}, signature={self.signature.hex()} valid={self.valid})"
+        else:
+            return f"Cosignature(key_hash={self.key_hash.hex()}, timestamp={self.timestamp}, signature={self.signature.hex()})"
 
     def verify(self, th: 'TreeHead', key: Optional[SigsumKey] = None):
         if key is None:
@@ -85,11 +90,16 @@ class Cosignature:
             if key.key_hash != self.key_hash:
                 raise ValueError(f'tried to verify cosignature with key_hash {self.key_hash.hex()} against mismatched key {key}')
 
+        if self.valid is not None:
+            return self.valid
+
         th_commitment = th.commitment()
         witness_commitment = f"cosignature/v1\ntime {self.timestamp}\n{th_commitment}"
         try:
             key.verify(witness_commitment.encode(), self.signature)
+            object.__setattr__(self, "valid", True)
         except nacl.exceptions.BadSignatureError:
+            object.__setattr__(self, "valid", False)
             raise CosignatureInvalidError('failed to verify cosignature from %s over "%s": %s' %
                                           (key, witness_commitment, self.signature.hex()))
 
