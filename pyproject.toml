@@ -9,6 +9,7 @@ authors = [
 dynamic = ["version"]
 requires-python = ">=3.11"
 dependencies = [
+ "ckdl>=1.0",
  "pynacl>=1.5.0",
  "requests>=2.32.4",
 ]

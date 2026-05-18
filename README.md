@@ -20,10 +20,10 @@ sigmon uses a single directory to store all configuration and state related to a
 ├── policy
 ├── log
 │   └── 4644af2abd40f4895a003bca350f9d5912ab301a49c77f13e5b6d905c20a5fe6.json
-└── watchlist
+└── watchlist.kdl
 ```
 
-The only mandatory file is `policy`, which is the [sigsum policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/v0.11.2/doc/policy.md) that describes the parameters of the log itself. The `log` subdirectory is created by the `init` subcommand and managed by `sigmon` itself thereafter. `watchlist` lists the keys to watch the log for and `hooks` contains the hooks that will get executed for specific events like `match`.
+The only mandatory file is `policy`, which is the [sigsum policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/v0.11.2/doc/policy.md) that describes the parameters of the log itself. The `log` subdirectory is created by the `init` subcommand and managed by `sigmon` itself thereafter. `watchlist.kdl` lists the keys to watch the log for and configures which hooks to call on a match. `hooks` contains the hook scripts themselves.
 
 To get started using the `barreleye` test log, create an empty directory (the name is arbitrary, but naming it after the log makes sense) and create a minimal policy file:
 
@@ -65,29 +65,42 @@ $ sigmon poll -i 60 barreleye
 
 As the configuration stands, this won't really do anything interesting other than check that the log is operating correctly. Supply the `-v` option to see the API calls that are being made (`sigmon -v poll barreleye`).
 
-To actually watch for keys, they need to be added to the `watchlist` file. Keys can be specified using either the verbatim public key or using the keyhash (both hex-encoded). The former is generally more useful because sigmon will also be able to validate the leaf signatures (and warn about invalid ones), but the latter allows one to watch for arbitrary key activity even if one does not know the corresponding public key.
+To actually watch for keys, they need to be added to the `watchlist.kdl` file. Keys can be specified using either the verbatim public key or using the keyhash (both hex-encoded). The former is generally more useful because sigmon will also be able to validate the leaf signatures (and warn about invalid ones), but the latter allows one to watch for arbitrary key activity even if one does not know the corresponding public key.
 
 Add a key to the watchlist as follows (or use `key` for a plain key instead):
 
 ```
-$ echo "keyhash c915d88e12fd0424aa55db620a7eaabffcad62de22e1981e9ad690a684cf55db" > barreleye/watchlist
+$ cat > barreleye/watchlist.kdl <<EOF
+keyhash "c915d88e12fd0424aa55db620a7eaabffcad62de22e1981e9ad690a684cf55db"
+EOF
 ```
 
 This keyhash has some activity in the barreleye log, so when you roll the state back to the beginning (using `sigmon init -f barreleye 0`) and then execute a poll, you should see some matches appear.
 
-Finally, entries in the watchlist can have attributes that are mainly passed to hooks directly. However, the special `alias` attribute is used to assign a human-readable name to a key:
+Entries in the watchlist can have an `alias` child node to assign a human-readable name to a key, `attr` child nodes to attach key-value metadata, and `match`/`leaf_info` child nodes to specify which hooks to call on a match. Templates can be used to share hook configuration across multiple keys:
 
 ```
-$ echo "keyhash c915d88e12fd0424aa55db620a7eaabffcad62de22e1981e9ad690a684cf55db alias=interesting-key email_address=notification@example.com" > barreleye/watchlist
+$ cat > barreleye/watchlist.kdl <<EOF
+template "notify" {
+    match "email" {
+        address "user@example.com"
+    }
+}
+
+keyhash "c915d88e12fd0424aa55db620a7eaabffcad62de22e1981e9ad690a684cf55db" {
+    alias "interesting-key"
+    inherit "notify"
+}
+EOF
 ```
 
-Now, `interesting-key` will be used in log statements instead of the hard to recognize hash. The `email_address` attribute could be used by a hook to decide who to notify about matches. Note that attributes cannot contain spaces.
+Now, `interesting-key` will be used in log statements instead of the hard to recognize hash, and the `hooks/match/email` script will be called on each match with `HOOK_PARAM_address` set accordingly.
 
 ## Hooks
 
-sigmon will execute hook scripts in certain cases. Currently, the only supported hook types are `match` and `leaf_info`, described below. Hooks are executed by runnign all the executable files (or symlinks to such files) in `hooks/$HOOK_TYPE/` in lexicographic order. The working directory is the top level state directory (i.e. the one that contains the policy file, for example) and all information is passed in through environment variables.
+sigmon will execute hook scripts in certain cases. Currently, the only supported hook types are `match` and `leaf_info`, described below. Hooks to call for a given key are configured in `watchlist.kdl` and the corresponding scripts are looked up by name in `hooks/HOOK_TYPE/`. The working directory is the top level state directory (i.e. the one that contains the policy file, for example) and all information is passed in through environment variables.
 
-See the `extra/hooks` directory for some example hooks. They take their configuration from a global config file in the state directory (`hook_cfg.sh`) or the watchlist, where the latter takes precedence.
+See the `extra/hooks` directory for some example hooks.
 
 ### `match`
 
@@ -103,9 +116,11 @@ The environment variables provided to the hook are:
  - `LEAF_SIGNATURE`: The contents of the `signature` field of the leaf (hex-encoded)
  - `LEAF_INFO_x` for each `leaf_info` result, where `x` is the leaf information hook name. See below for more information.
  - `KEY_HASH`: The contents of the `key_hash` field of the leaf (hex-encoded)
- - `KEY_ATTR_x` for each attribute `x` specified in the watchlist
+ - `KEY_NAME`: The alias of the matched key, or its hex representation if no alias was set
+ - `KEY_ATTR_x` for each attribute `x` specified for the key in the watchlist
+ - `HOOK_PARAM_x` for each parameter `x` specified on the hook node in the watchlist
 
-Additionally, if the `key` directive was used in the watch file, the following variables are present:
+Additionally, if the `key` directive was used in the watchlist, the following variables are present:
  - `KEY`: The pubkey itself (hex-encoded)
  - `LEAF_SIGNATURE_VALID`: `1` if the leaf signature is valid, `0` otherwise.
 
@@ -116,4 +131,3 @@ Before a match event is emitted, `leaf_info` hooks are run that can fetch auxili
 Some considerations for implementing a leaf information hook:
  - It should validate whatever information it retrieves against the `LEAF_CHEKSUM` parameter, otherwise an attacker could possibly falsify it in-flight.
  - It should print whatever information it wishes to add to stdout. If it has nothing to add, it should produce no output.
- - It can use the `KEY_HASH` or some `KEY_ATTR_` field to determine if it should handle a given leaf.

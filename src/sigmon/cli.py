@@ -17,7 +17,7 @@ from .sigsum import SigsumLogAPI, TreeLeaf, QuorumPolicy, QuorumUnsatisfiedError
 from .monitor import Monitor
 from .utils import sha256
 
-from . import utils
+from . import utils, config
 
 logger = logging.getLogger(__name__)
 
@@ -93,56 +93,6 @@ def build_parser():
     return parser
 
 
-def load_matches(path: Path) -> dict[str, dict[str, Any]]:
-    matches = {}
-
-    with open(path, 'r') as f:
-        for lineno, line in enumerate(f, start=1):
-            if line.startswith('#'):
-                continue
-
-            line = line.strip()
-            if not line:
-                continue
-
-            items = line.split()
-            match items[0]:
-                case 'keyhash':
-                    keyhash = bytes.fromhex(items[1])
-                    if len(keyhash) != 32:
-                        raise ValueError(f'malformed key hash in line {lineno}: unexpected length {len(keyhash)}')
-
-                    key = None
-
-                case 'key':
-                    key = bytes.fromhex(items[1])
-                    if len(key) != 32:
-                        raise ValueError(f'malformed key in line {lineno}: unexpected length {len(key)}')
-
-                    keyhash = sha256(key)
-
-                case _:
-                    raise ValueError(f'unknown match type {items[0]} in line {lineno}')
-
-            if keyhash in matches:
-                raise ValueError(f'key hash added in line {lineno} is {keyhash.hex()} already present')
-            else:
-                matches[keyhash] = {}
-
-            if key is not None:
-                matches[keyhash]['_key'] = key
-
-            for attr in items[2:]:
-                k, v = attr.split('=', maxsplit=1)
-
-                if k.startswith('_'):
-                    raise ValueError(f'key {k} uses reserved prefix')
-
-                matches[keyhash][k] = v
-
-    return matches
-
-
 def do_init(args: argparse.Namespace):
     with open(args.state_dir / 'policy', 'r') as f:
         log = SigsumLogAPI.from_policy(f.read(), log_filter=args.log)
@@ -163,50 +113,56 @@ def do_init(args: argparse.Namespace):
     state.save()
 
 
-def call_hooks(state_dir: Path, hook_type: str, env: dict[str, str], run_args: Optional[dict[str, Any]] = None):
+def call_hook(state_dir: Path, hook_type: str, hook_name: str, env: dict[str, str], run_args: Optional[dict[str, Any]] = None) -> Optional[Any]:
+    hook_path = (state_dir / 'hooks' / hook_type / hook_name)
+    resolved = hook_path.resolve()
+    if not resolved.exists():
+        logging.warning(f'{hook_type} hook "{hook_name}" does not exist')
+        return None
+
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        logging.warning(f'{hook_type} hook "{hook_name}" is not executable')
+        return None
+
     merged_env = os.environ.copy()
     merged_env.update(env)
 
     if run_args is None:
         run_args = {}
 
+    ret = subprocess.run([str(hook_path)], cwd=state_dir, env=merged_env, **run_args)
+    if ret.returncode != 0:
+        logger.warning(f'{hook_type} hook "{hook_name}" failed, exit code {ret.returncode}')
+
+    return ret
+
+
+def call_all_hooks(state_dir: Path, hook_type: str, env: dict[str, str]):
     hook_dir = state_dir / 'hooks' / hook_type
     if not hook_dir.exists():
         return
 
     for child in sorted(hook_dir.iterdir()):
-        resolved = child.resolve()
-        if not resolved.is_file():
-            continue
+        call_hook(state_dir, hook_type, child.name, env)
 
-        if not os.access(resolved, os.X_OK):
-            continue
 
-        ret = subprocess.run([str(resolved)], cwd=state_dir, env=merged_env, **run_args)
-        if ret.returncode != 0:
-            logger.warning(f'executing handler "{child.name}" for hook type "{hook_type}" failed, exit code {ret.returncode}')
-
-        yield child.name, ret
-
-def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], leaf: TreeLeaf):
+def handle_match(state_dir: Path, log: str, idx: int, match: config.KeyEntry, leaf: TreeLeaf):
     env: dict[str, str] = {
         'LOG_ENDPOINT': log,
         'LEAF_INDEX': str(idx),
         'LEAF_CHECKSUM': leaf.checksum.hex(),
         'LEAF_SIGNATURE': leaf.signature.hex(),
         'KEY_HASH': leaf.key_hash.hex(),
+        'KEY_NAME': match.name,
     }
 
-    for k, v in match.items():
-        if k.startswith('_'):
-            continue
-
+    for k, v in match.attrs.items():
         env[f'KEY_ATTR_{k}'] = v
 
-    if '_key' in match:
-        env['KEY'] = match['_key'].hex()
+    if match.key is not None:
+        env['KEY'] = match.key.hex()
 
-        verify_key = nacl.signing.VerifyKey(match['_key'])
+        verify_key = nacl.signing.VerifyKey(match.key)
         try:
             verify_key.verify(b'sigsum.org/v1/tree-leaf\x00' + leaf.checksum, leaf.signature)
             env['LEAF_SIGNATURE_VALID'] = '1'
@@ -214,18 +170,24 @@ def handle_match(state_dir: Path, log: str, idx: int, match: dict[str, Any], lea
             logger.warning(f'signature check on leaf {leaf}, idx {idx} failed')
             env['LEAF_SIGNATURE_VALID'] = '0'
 
-    for hook_name, result in call_hooks(state_dir, 'leaf_info', env, run_args={
-            'stdout': subprocess.PIPE,
-            'text': True
-    }):
-        if result.returncode != 0:
-            continue
+    for hook in match.hooks:
+        hook_env = env.copy()
+        for k, v in hook.params.items():
+            hook_env[f'HOOK_PARAM_{k}'] = v
 
-        if result.stdout:
-            env[f'LEAF_INFO_{hook_name}'] = result.stdout.strip()
+        if hook.kind == 'leaf_info':
+            result = call_hook(state_dir, 'leaf_info', hook.name, hook_env, run_args={
+                'stdout': subprocess.PIPE,
+                'text': True,
+            })
 
-    for _ in call_hooks(state_dir, 'match', env):
-        pass
+            if result is None or  result.returncode != 0:
+                continue
+
+            if result.stdout:
+                env[f'LEAF_INFO_{hook.name}'] = result.stdout.strip()
+        else:
+            call_hook(state_dir, 'match', hook.name, hook_env)
 
 
 def do_poll(args: argparse.Namespace):
@@ -238,7 +200,7 @@ def do_poll(args: argparse.Namespace):
     state = State(args.state_dir / 'log' / f'{bytes(log.pubkey.key).hex()}.json')
     state.load()
 
-    watchlist = args.state_dir / 'watchlist'
+    watchlist = args.state_dir / 'watchlist.kdl'
     watchlist_ts = None
     matches = {}
 
@@ -251,7 +213,11 @@ def do_poll(args: argparse.Namespace):
                 if watchlist_ts is not None:
                     logger.info('reloading watchlist')
 
-                matches = load_matches(args.state_dir / 'watchlist')
+                try:
+                    matches = config.load_config(watchlist)
+                except Exception as e:
+                    logger.error('reloading matches failed', exc_info=e)
+
                 watchlist_ts = mtime
 
         while True:
@@ -267,7 +233,7 @@ def do_poll(args: argparse.Namespace):
                     continue
 
                 match = matches[leaf.key_hash]
-                logger.info(f'index {idx} matched key {match["alias"] if "alias" in match else leaf.key_hash.hex()}, checksum is {leaf.checksum.hex()}')
+                logger.info(f'index {idx} matched key {match.name}, checksum is {leaf.checksum.hex()}')
 
                 handle_match(args.state_dir, log.endpoint, idx, match, leaf)
 
@@ -315,8 +281,7 @@ def do_poll(args: argparse.Namespace):
                 logger.error(f'log is stale: last success at {last_success}, {last_success_age} seconds ago')
 
                 env['STATE'] = 'failed'
-                for _ in call_hooks(args.state_dir, 'log_health', env):
-                    pass
+                call_all_hooks(args.state_dir, 'log_health', env)
 
                 state['alerts', 'stale_active'] = True
                 state.save()
@@ -325,8 +290,7 @@ def do_poll(args: argparse.Namespace):
                 logger.info('log has recovered from being stale')
 
                 env['STATE'] = 'okay'
-                for _ in call_hooks(args.state_dir, 'log_health', env):
-                    pass
+                call_all_hooks(args.state_dir, 'log_health', env)
 
                 state['alerts', 'stale_active'] = False
                 state.save()

@@ -40,14 +40,17 @@ def test_do_poll_fires_match_hook(state_dir: Path, fake_log: FakeSigsumLog):
     cli.do_init(_init_args(state_dir, leaf_index=0))
 
     target_kh = b'\x11' * 32
-    (state_dir / 'watchlist').write_text(
-        f'keyhash {target_kh.hex()} alias=target\n'
+    (state_dir / 'watchlist.kdl').write_text(
+        f'keyhash "{target_kh.hex()}" {{\n'
+        f'    alias "target"\n'
+        f'    match "record"\n'
+        f'}}\n'
     )
     _make_hook(
         state_dir,
         'match',
         'record',
-        'echo "$LEAF_INDEX $KEY_HASH $KEY_ATTR_alias" >> matches.log',
+        'echo "$LEAF_INDEX $KEY_HASH $KEY_NAME" >> matches.log',
     )
 
     fake_log.append(make_leaf(0, key_hash=b'\xaa' * 32))
@@ -69,8 +72,11 @@ def test_do_poll_check_sig(state_dir: Path, fake_log: FakeSigsumLog):
 
     leaf_key = nacl.signing.SigningKey.generate()
 
-    (state_dir / 'watchlist').write_text(
-        f'key {bytes(leaf_key.verify_key).hex()} alias=target\n'
+    (state_dir / 'watchlist.kdl').write_text(
+        f'key "{bytes(leaf_key.verify_key).hex()}" {{\n'
+        f'    alias "target"\n'
+        f'    match "record"\n'
+        f'}}\n'
     )
     _make_hook(
         state_dir,
@@ -106,8 +112,11 @@ def test_do_poll_still_fires_match_without_quorum(
     cli.do_init(_init_args(state_dir, leaf_index=0))
 
     target_kh = b'\x11' * 32
-    (state_dir / 'watchlist').write_text(
-        f'keyhash {target_kh.hex()} alias=target\n'
+    (state_dir / 'watchlist.kdl').write_text(
+        f'keyhash "{target_kh.hex()}" {{\n'
+        f'    alias "target"\n'
+        f'    match "record"\n'
+        f'}}\n'
     )
     _make_hook(
         state_dir,
