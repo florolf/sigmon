@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -ueo pipefail
+
+if [[ "${LEAF_SIGNATURE_VALID+x}" ]]
+then
+	if [[ "$LEAF_SIGNATURE_VALID" -eq 1 ]]
+	then
+		is_valid="valid "
+	else
+		is_valid="INVALID "
+	fi
+else
+	is_valid=""
+fi
+
+msg="New ${is_valid}signature at index ${LEAF_INDEX} on ${LOG_ENDPOINT} from ${KEY_NAME}, checksum ${LEAF_CHECKSUM}"
+
+curl -s \
+  --form-string "token=$HOOK_PARAM_app_token" \
+  --form-string "user=$HOOK_PARAM_user_token" \
+  --form-string "sound=vibrate" \
+  --form-string "priority=1" \
+  --form-string "message=$msg" \
+  https://api.pushover.net/1/messages.json
