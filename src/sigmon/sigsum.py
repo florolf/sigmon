@@ -32,8 +32,12 @@ def parse_ascii(doc: str) -> dict[str, list[list[str]]]:
 
 
 class SigsumKey:
-    __slots__ = ('key', 'key_hash')
+    key: bytes
+    key_hash: bytes
+
     _dictionary: ClassVar[dict[bytes, Self]] = {}
+
+    __slots__ = ('key', 'key_hash')
 
     def __new__(cls, key: bytes) -> Self:
         if len(key) != 32:
