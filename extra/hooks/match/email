@@ -2,23 +2,6 @@
 
 set -ueo pipefail
 
-if [[ -f ./hook_cfg.sh ]]
-then
-	source ./hook_cfg.sh
-fi
-
-if [[ -n "${KEY_ATTR_email_address+x}" ]]
-then
-	EMAIL_ADDRESS="$KEY_ATTR_email_address"
-fi
-
-if [[ -z "${EMAIL_ADDRESS+x}" ]]
-then
-	exit 0
-fi
-
-key_name="${KEY_ATTR_alias:-$KEY_HASH}"
-
 if [[ "${LEAF_SIGNATURE_VALID+x}" ]]
 then
 	if [[ "$LEAF_SIGNATURE_VALID" -eq 1 ]]
@@ -47,4 +30,4 @@ EOF
 		echo "${!hook}"
 		echo "------------------------------------------------------------------------"
 	done
-) | mail -s "New ${is_valid}signature from \"${key_name}\" on ${LOG_ENDPOINT} (index ${LEAF_INDEX})" "$EMAIL_ADDRESS"
+) | mail -s "New ${is_valid}signature from \"${KEY_NAME}\" on ${LOG_ENDPOINT} (index ${LEAF_INDEX})" "$HOOK_PARAM_address"
